@@ -132,13 +132,15 @@ const bird = {
         ctx.arc(0, 0, BIRDR, 0, Math.PI * 2);
         ctx.clip();
 
-        // background layer
-        const bgImg = IMG.backgrounds[TRAITS.backgrounds[sel.backgrounds]];
-        if (imgReady(bgImg)) {
-            ctx.drawImage(bgImg, -BIRDR, -BIRDR, d, d);
-        } else {
-            ctx.fillStyle = '#2a2a3e';
-            ctx.fillRect(-BIRDR, -BIRDR, d, d);
+        // background layer — only in customizer preview, not in game
+        if (showRing) {
+            const bgImg = IMG.backgrounds[TRAITS.backgrounds[sel.backgrounds]];
+            if (imgReady(bgImg)) {
+                ctx.drawImage(bgImg, -BIRDR, -BIRDR, d, d);
+            } else {
+                ctx.fillStyle = '#2a2a3e';
+                ctx.fillRect(-BIRDR, -BIRDR, d, d);
+            }
         }
 
         // eyes layer
