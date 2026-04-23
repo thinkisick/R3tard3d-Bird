@@ -326,107 +326,139 @@ const PORTALS = [
     { yFrac:0.68, label:'🎨  CUSTOMIZE', color:'#8e44ad', glow:'#9b59b6', action:()=>{ state='CUSTOMIZER'; } },
 ];
 
+let mBirdFlapTimer = 0;
+
 function updateMenuBird() {
-    mBird.vy = Math.min(mBird.vy + GRAVITY_V, canvas.height*0.022);
-    mBird.y += mBird.vy;
-    mBird.x += Math.min(canvas.width*0.004, 4);
+    // float in place — pure sine, no physics
+    mBird.x = canvas.width  * 0.26;
+    mBird.y = canvas.height * 0.5
+            + Math.sin(frameCount * 0.055) * canvas.height * 0.038
+            + (mBirdFlapTimer > 0 ? -Math.sin((mBirdFlapTimer/12)*Math.PI)*canvas.height*0.04 : 0);
+    if (mBirdFlapTimer > 0) mBirdFlapTimer--;
+}
 
-    const pX = canvas.width * 0.72;
-    const pR = canvas.height * 0.09;
-
-    // portal collision
-    if (mBird.x > pX - BIRDR && mBird.x < pX + BIRDR*2) {
-        for (const p of PORTALS) {
-            if (Math.abs(mBird.y - p.yFrac*canvas.height) < pR*0.85) {
-                p.action(); return;
-            }
-        }
+function menuBtn(x, y, w, h, r, color, glowColor, hovered) {
+    // glow
+    if (hovered) {
+        ctx.save();
+        ctx.shadowColor = glowColor;
+        ctx.shadowBlur  = 28;
+        ctx.fillStyle   = color;
+        ctx.beginPath(); ctx.roundRect(x,y,w,h,r); ctx.fill();
+        ctx.restore();
     }
-    // reset if out of bounds
-    if (mBird.y > canvas.height - GH - BIRDR || mBird.y < BIRDR || mBird.x > canvas.width*0.88) {
-        initMenuBird();
-    }
+    // bg
+    ctx.beginPath(); ctx.roundRect(x,y,w,h,r);
+    ctx.fillStyle = hovered ? color : color+'cc'; ctx.fill();
+    // shine
+    ctx.beginPath(); ctx.roundRect(x+2,y+2,w-4,h*0.38,[r,r,0,0]);
+    ctx.fillStyle='rgba(255,255,255,0.14)'; ctx.fill();
+    // border
+    ctx.beginPath(); ctx.roundRect(x,y,w,h,r);
+    ctx.strokeStyle = glowColor; ctx.lineWidth = hovered?2.5:1.5; ctx.stroke();
 }
 
 function drawMenu() {
-    const W = canvas.width, H = canvas.height, cx = W/2;
+    const W = canvas.width, H = canvas.height;
     menuTimer++;
     updateMenuBird();
 
-    // background (use selected NFT bg)
+    // NFT background + heavy dark vignette
     drawBackground();
-    // dark overlay so UI is readable
-    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillStyle = 'rgba(0,0,0,0.52)';
     ctx.fillRect(0, 0, W, H);
+
+    // radial vignette — dark edges
+    const vig = ctx.createRadialGradient(W/2,H/2,H*0.15,W/2,H/2,H*0.88);
+    vig.addColorStop(0,'rgba(0,0,0,0)');
+    vig.addColorStop(1,'rgba(0,0,0,0.72)');
+    ctx.fillStyle=vig; ctx.fillRect(0,0,W,H);
+
     drawGround();
 
-    // pixel title wave
-    const titleSize = Math.min(Math.round(W*0.042), 36);
-    drawPixelTitle(cx, H*0.13, titleSize, true);
+    // ── pixel title ──
+    const ts = Math.min(Math.round(W*0.038),32);
+    drawPixelTitle(W/2, H*0.11, ts, true);
 
-    // portals
-    const pX = W*0.72;
-    const pR = H*0.09;
-    PORTALS.forEach((p, i) => {
-        const py  = p.yFrac * H;
-        const near = Math.hypot(mBird.x-pX, mBird.y-py) < pR*2;
-        const pulse = 1 + 0.06*Math.sin(frameCount*0.1 + i*Math.PI);
+    // ── LEFT ZONE: character card ──
+    const cz = { x: W*0.04, y: H*0.22, w: W*0.42, h: H*0.58 };
+    ctx.beginPath(); ctx.roundRect(cz.x,cz.y,cz.w,cz.h,20);
+    ctx.fillStyle='rgba(0,0,0,0.38)'; ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.08)'; ctx.lineWidth=1; ctx.stroke();
 
-        // glow
-        const gr = ctx.createRadialGradient(pX,py,0,pX,py,pR*2.5);
-        gr.addColorStop(0, p.color+'66');
-        gr.addColorStop(1, 'transparent');
-        ctx.fillStyle = gr;
-        ctx.beginPath(); ctx.arc(pX,py,pR*2.5,0,Math.PI*2); ctx.fill();
-
-        // rotating ring
-        ctx.save(); ctx.translate(pX,py); ctx.rotate(frameCount*0.02*(i?-1:1));
-        for (let d=0;d<8;d++) {
-            const a = (d/8)*Math.PI*2;
-            ctx.beginPath();
-            ctx.arc(Math.cos(a)*pR*1.25, Math.sin(a)*pR*1.25, 4, 0, Math.PI*2);
-            ctx.fillStyle = p.glow;
-            ctx.fill();
-        }
-        ctx.restore();
-
-        // main circle
-        ctx.save(); ctx.translate(pX,py); ctx.scale(pulse,pulse);
-        ctx.beginPath(); ctx.arc(0,0,pR,0,Math.PI*2);
-        ctx.fillStyle = p.color+'44'; ctx.fill();
-        ctx.strokeStyle = near ? p.glow : p.color;
-        ctx.lineWidth = near ? 4 : 2.5; ctx.stroke();
-
-        // label
-        ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.font=`bold ${Math.round(H*0.025)}px Arial`;
-        ctx.fillStyle='white';
-        ctx.shadowColor=p.glow; ctx.shadowBlur=8;
-        ctx.fillText(p.label, 0, 0);
-        ctx.shadowBlur=0;
-        ctx.restore();
-    });
-
-    // flying menuBird
-    const mRot = Math.max(-25, Math.min(90, mBird.vy/GRAVITY_V*3.3));
-    bird.draw(mBird.x, mBird.y, mRot, false, null);
-
-    // hint text pulsing
-    const pulse2 = 0.6 + 0.4*Math.abs(Math.sin(frameCount*0.06));
-    ctx.globalAlpha = pulse2;
+    // "YOUR BIRD" label
     ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.font=`bold ${Math.round(H*0.022)}px Arial`;
+    ctx.font=`bold ${Math.round(H*0.018)}px Arial`;
+    ctx.fillStyle='rgba(255,255,255,0.4)';
+    ctx.fillText('YOUR BIRD', cz.x+cz.w/2, cz.y+cz.h*0.1);
+
+    // floating particles around character
+    const pcx = mBird.x, pcy = mBird.y;
+    const pR2  = Math.min(BIRDR*2.2,60);
+    for (let i=0;i<6;i++) {
+        const a = (i/6)*Math.PI*2 + frameCount*0.03*(i%2?1:-1);
+        const r = pR2 + Math.sin(frameCount*0.07+i)*8;
+        const px2= pcx+Math.cos(a)*r, py2=pcy+Math.sin(a)*r;
+        ctx.beginPath(); ctx.arc(px2,py2,3+Math.sin(frameCount*0.1+i)*1.5,0,Math.PI*2);
+        ctx.fillStyle=`hsla(${(frameCount*2+i*60)%360},80%,70%,0.7)`;
+        ctx.fill();
+    }
+
+    // character glow ring
+    const glR = ctx.createRadialGradient(pcx,pcy,BIRDR,pcx,pcy,BIRDR*2.5);
+    glR.addColorStop(0,'rgba(255,255,255,0.18)');
+    glR.addColorStop(1,'rgba(255,255,255,0)');
+    ctx.fillStyle=glR; ctx.beginPath(); ctx.arc(pcx,pcy,BIRDR*2.5,0,Math.PI*2); ctx.fill();
+
+    // character
+    const mRot = mBirdFlapTimer>0 ? -18 : Math.sin(frameCount*0.055)*8;
+    bird.draw(pcx, pcy, mRot, true, null);
+
+    // "CLICK TO FLAP" hint inside card
+    const pls = 0.5+0.5*Math.abs(Math.sin(frameCount*0.06));
+    ctx.globalAlpha=pls*0.7;
+    ctx.font=`${Math.round(H*0.016)}px Arial`;
     ctx.fillStyle='white';
-    ctx.fillText('TAP / CLICK to flap  ·  Fly through a portal', cx, H*0.88);
+    ctx.fillText('click to flap', cz.x+cz.w/2, cz.y+cz.h*0.88);
     ctx.globalAlpha=1;
 
+    // ── RIGHT ZONE: buttons ──
+    const bx  = W*0.52, bw = W*0.44;
+    const btnH = Math.min(Math.round(H*0.14), 90);
+    const gap  = Math.round(H*0.035);
+    const by1  = H*0.33, by2 = by1+btnH+gap;
+
+    const hovPlay = mouseX>bx&&mouseX<bx+bw&&mouseY>by1&&mouseY<by1+btnH;
+    const hovCust = mouseX>bx&&mouseX<bx+bw&&mouseY>by2&&mouseY<by2+btnH;
+
+    menuBtn(bx, by1, bw, btnH, 14, '#1e8449', '#2ecc71', hovPlay);
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.font=`bold ${Math.round(H*0.032)}px Arial`;
+    ctx.fillStyle='white';
+    ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=4;
+    ctx.fillText('▶  PLAY', bx+bw/2, by1+btnH/2);
+    ctx.shadowBlur=0;
+    UI.menuPlay = {x:bx,y:by1,w:bw,h:btnH};
+
+    menuBtn(bx, by2, bw, btnH, 14, '#5b2c8d', '#9b59b6', hovCust);
+    ctx.font=`bold ${Math.round(H*0.028)}px Arial`;
+    ctx.fillStyle='white';
+    ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=4;
+    ctx.fillText('🎨  CUSTOMIZE', bx+bw/2, by2+btnH/2);
+    ctx.shadowBlur=0;
+    UI.menuCustomize = {x:bx,y:by2,w:bw,h:btnH};
+
+    // tagline below buttons
+    ctx.font=`${Math.round(H*0.018)}px Arial`;
+    ctx.fillStyle='rgba(255,255,255,0.35)';
+    ctx.fillText('build your character →', bx+bw/2, by2+btnH+Math.round(H*0.03));
+
+    // best score
     if (best > 0) {
-        ctx.font=`${Math.round(H*0.018)}px Arial`;
+        ctx.font=`bold ${Math.round(H*0.02)}px Arial`;
         ctx.fillStyle='#FFD700';
-        ctx.fillText(`🏆  Best: ${best}`, cx, H*0.93);
+        ctx.fillText(`🏆  Best: ${best}`, bx+bw/2, by2+btnH+Math.round(H*0.07));
     }
-    UI.menuPlay      = { x:0,y:0,w:0,h:0 };
-    UI.menuCustomize = { x:0,y:0,w:0,h:0 };
 }
 
 // ─── DRAW: GAME ELEMENTS ─────────────────────────────────────────
@@ -680,115 +712,123 @@ function drawDead() {
     deadTimer++;
     const W = canvas.width, H = canvas.height, cx = W/2;
 
-    // red-tinted overlay fades in
-    const overlayA = easeOut(deadTimer, 18) * 0.62;
-    ctx.fillStyle = `rgba(20,0,0,${overlayA})`;
+    // dark red overlay
+    const overlayA = easeOut(deadTimer, 20) * 0.68;
+    ctx.fillStyle = `rgba(10,0,0,${overlayA})`;
     ctx.fillRect(0, 0, W, H);
 
-    // panel slides in from top
-    const panelW  = Math.min(Math.round(W*0.82), 420);
-    const panelH  = Math.round(H*0.58);
-    const panelX  = cx - panelW/2;
-    const slideP  = easeOutBack(deadTimer, 30);
-    const panelY  = H*0.18 + (1-Math.min(slideP,1)) * (-H*0.4);
+    // panel
+    const panelW = Math.min(Math.round(W*0.78), 440);
+    const panelH = Math.round(H*0.62);
+    const panelX = cx - panelW/2;
+    const slideP = easeOutBack(deadTimer, 28);
+    const panelY = H*0.17 + (1 - Math.min(slideP,1)) * (-H*0.45);
 
-    // glow behind panel
-    const glowA = easeOut(deadTimer, 25) * 0.5;
+    // red glow behind panel
     ctx.save();
-    ctx.shadowColor = `rgba(200,0,0,${glowA})`;
-    ctx.shadowBlur  = 60;
-    ctx.fillStyle   = 'transparent';
-    ctx.fillRect(panelX, panelY, panelW, panelH);
+    ctx.shadowColor = `rgba(220,0,0,${easeOut(deadTimer,25)*0.6})`;
+    ctx.shadowBlur  = 70;
+    ctx.fillStyle   = 'rgba(0,0,0,0.01)';
+    ctx.fillRect(panelX+20, panelY+20, panelW-40, panelH-40);
     ctx.restore();
 
-    // panel background
-    rr(panelX, panelY, panelW, panelH, 20, '#0c0c18', 'rgba(180,0,0,0.35)', 2);
+    // panel body
+    rr(panelX, panelY, panelW, panelH, 22, '#0d0d1e', null);
+    // red left edge accent
+    ctx.fillStyle='#c0392b';
+    ctx.beginPath(); ctx.roundRect(panelX, panelY, 5, panelH, [22,0,0,22]); ctx.fill();
+    // top border glow line
+    const tg = ctx.createLinearGradient(panelX,panelY,panelX+panelW,panelY);
+    tg.addColorStop(0,'rgba(192,57,43,0)'); tg.addColorStop(0.5,'rgba(192,57,43,0.9)'); tg.addColorStop(1,'rgba(192,57,43,0)');
+    ctx.fillStyle=tg; ctx.fillRect(panelX, panelY, panelW, 2);
 
-    // red top accent bar
-    rr(panelX, panelY, panelW, 5, [20,20,0,0], '#c0392b', null);
+    const textA = easeOut(Math.max(deadTimer-6,0), 16);
+    ctx.globalAlpha = Math.min(textA,1);
 
-    const textA = easeOut(Math.max(deadTimer-8, 0), 18);
-    ctx.globalAlpha = Math.min(textA, 1);
-
-    // character face preview at top of panel
-    const faceR  = Math.min(Math.round(H*0.07), 60);
-    const faceY  = panelY - faceR * 0.4;
+    // character face above panel
+    const faceR = Math.min(Math.round(H*0.075), 62);
+    const faceY = panelY - faceR*0.3;
+    // face glow
+    const fg = ctx.createRadialGradient(cx,faceY,0,cx,faceY,faceR*2);
+    fg.addColorStop(0,'rgba(192,57,43,0.35)'); fg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=fg; ctx.beginPath(); ctx.arc(cx,faceY,faceR*2,0,Math.PI*2); ctx.fill();
     bird.draw(cx, faceY, 0, true, faceR);
-    // ring around face
-    ctx.save();
-    ctx.translate(cx, faceY);
-    ctx.beginPath(); ctx.arc(0, 0, faceR+3, 0, Math.PI*2);
-    ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 3; ctx.stroke();
+    ctx.save(); ctx.translate(cx,faceY);
+    ctx.beginPath(); ctx.arc(0,0,faceR+3,0,Math.PI*2);
+    ctx.strokeStyle='#e74c3c'; ctx.lineWidth=3; ctx.stroke();
     ctx.restore();
 
-    // "YOU DIED" text
-    const titleFS = Math.min(Math.round(H*0.065), 56);
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = `900 ${titleFS}px Arial`;
-    // stroke outline
-    ctx.strokeStyle = '#7b0000'; ctx.lineWidth = titleFS*0.08;
-    ctx.strokeText('YOU DIED', cx, panelY + panelH*0.28);
-    ctx.fillStyle = '#e74c3c';
-    ctx.fillText('YOU DIED', cx, panelY + panelH*0.28);
+    // YOU DIED
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    const titleFS = Math.min(Math.round(H*0.068), 58);
+    ctx.font=`900 ${titleFS}px Arial`;
+    ctx.strokeStyle='rgba(0,0,0,0.8)'; ctx.lineWidth=titleFS*0.1;
+    ctx.strokeText('YOU DIED', cx, panelY+panelH*0.27);
+    ctx.fillStyle='#e74c3c'; ctx.fillText('YOU DIED', cx, panelY+panelH*0.27);
 
-    // "R3TARD" in yellow below
-    const subFS = Math.min(Math.round(H*0.038), 32);
-    ctx.font = `bold ${subFS}px 'Press Start 2P', monospace`;
-    ctx.strokeStyle = '#5a4000'; ctx.lineWidth = subFS*0.1;
-    ctx.strokeText('R3TARD', cx, panelY + panelH*0.42);
-    ctx.fillStyle = '#FFD700';
-    ctx.fillText('R3TARD', cx, panelY + panelH*0.42);
+    // R3TARD
+    const subFS = Math.min(Math.round(H*0.036), 30);
+    ctx.font=`bold ${subFS}px 'Press Start 2P', monospace`;
+    ctx.strokeStyle='rgba(0,0,0,0.9)'; ctx.lineWidth=subFS*0.12;
+    ctx.strokeText('R3TARD', cx, panelY+panelH*0.41);
+    ctx.fillStyle='#FFD700'; ctx.fillText('R3TARD', cx, panelY+panelH*0.41);
 
     // divider
-    ctx.globalAlpha = Math.min(textA, 1) * 0.3;
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(panelX + panelW*0.1, panelY + panelH*0.51, panelW*0.8, 1);
-    ctx.globalAlpha = Math.min(textA, 1);
+    const dg = ctx.createLinearGradient(panelX+panelW*0.08,0,panelX+panelW*0.92,0);
+    dg.addColorStop(0,'rgba(255,255,255,0)'); dg.addColorStop(0.5,'rgba(255,255,255,0.2)'); dg.addColorStop(1,'rgba(255,255,255,0)');
+    ctx.fillStyle=dg; ctx.fillRect(panelX+panelW*0.08, panelY+panelH*0.5, panelW*0.84, 1);
 
-    // score row
-    const statFS = Math.min(Math.round(H*0.028), 24);
-    ctx.font = `${statFS}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#fff';
-    ctx.fillText(`Score`, panelX + panelW*0.3, panelY + panelH*0.59);
-    ctx.fillStyle = '#fff';
-    ctx.font = `bold ${Math.round(statFS*1.3)}px Arial`;
-    ctx.fillText(score, panelX + panelW*0.62, panelY + panelH*0.59);
+    // stats — two columns
+    const statFS = Math.min(Math.round(H*0.028), 23);
+    const col1x  = panelX+panelW*0.28, col2x = panelX+panelW*0.65;
+    const row1y  = panelY+panelH*0.6,  row2y = panelY+panelH*0.72;
 
-    ctx.font = `${statFS}px Arial`;
-    ctx.fillStyle = '#FFD700';
-    ctx.fillText(`Best`, panelX + panelW*0.3, panelY + panelH*0.7);
-    ctx.font = `bold ${Math.round(statFS*1.3)}px Arial`;
-    ctx.fillText(best, panelX + panelW*0.62, panelY + panelH*0.7);
+    ctx.font=`${statFS}px Arial`; ctx.fillStyle='rgba(255,255,255,0.6)';
+    ctx.textAlign='left';
+    ctx.fillText('Score', col1x, row1y);
+    ctx.fillText('Best',  col1x, row2y);
 
-    if (score > 0 && score >= best) {
-        ctx.font = `bold ${Math.round(statFS*0.85)}px Arial`;
-        ctx.fillStyle = '#2ecc71';
-        ctx.textAlign = 'center';
-        ctx.fillText('🏆  NEW RECORD!', cx, panelY + panelH*0.78);
+    ctx.font=`bold ${Math.round(statFS*1.25)}px Arial`;
+    ctx.textAlign='right';
+    ctx.fillStyle='white';  ctx.fillText(score, col2x, row1y);
+    ctx.fillStyle='#FFD700'; ctx.fillText(best,  col2x, row2y);
+
+    if (score>0 && score>=best) {
+        ctx.font=`bold ${Math.round(statFS*0.82)}px Arial`;
+        ctx.fillStyle='#2ecc71'; ctx.textAlign='center';
+        ctx.fillText('🏆  NEW RECORD!', cx, panelY+panelH*0.81);
     }
 
-    // buttons appear after delay
-    const btnA = easeOut(Math.max(deadTimer-28, 0), 16);
-    ctx.globalAlpha = Math.min(btnA, 1);
+    // buttons — both proper, appear with delay
+    const btnA = easeOut(Math.max(deadTimer-26,0), 16);
+    ctx.globalAlpha = Math.min(btnA,1);
 
-    const btnH2 = Math.round(panelH*0.14);
-    const btnW2 = panelW*0.82;
-    const btnX2 = panelX + (panelW-btnW2)/2;
-    const btnY2 = panelY + panelH - btnH2 - Math.round(panelH*0.06);
+    const bh   = Math.round(panelH*0.135);
+    const bpad = panelW*0.07;
+    const bw1  = panelW*0.86;
+    const bx1  = panelX+bpad;
+    const by1  = panelY+panelH - bh*2 - Math.round(panelH*0.07) - Math.round(panelH*0.025);
+    const by2  = by1+bh+Math.round(panelH*0.025);
 
-    rr(btnX2, btnY2, btnW2, btnH2, 12, '#27ae60', null);
-    ctx.font = `bold ${Math.min(Math.round(H*0.026),22)}px Arial`;
-    ctx.fillStyle = 'white'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('▶  Play Again', cx, btnY2+btnH2/2);
-    UI.restart = {x:btnX2,y:btnY2,w:btnW2,h:btnH2};
+    // Play Again (green)
+    menuBtn(bx1, by1, bw1, bh, 12, '#1e8449', '#2ecc71', mouseX>bx1&&mouseX<bx1+bw1&&mouseY>by1&&mouseY<by1+bh);
+    ctx.font=`bold ${Math.min(Math.round(H*0.028),24)}px Arial`;
+    ctx.fillStyle='white'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.shadowColor='rgba(0,0,0,0.4)'; ctx.shadowBlur=4;
+    ctx.fillText('▶  Play Again', cx, by1+bh/2);
+    ctx.shadowBlur=0;
+    UI.restart = {x:bx1,y:by1,w:bw1,h:bh};
 
-    ctx.globalAlpha = Math.min(btnA, 1) * 0.6;
-    ctx.font = `${Math.round(H*0.02)}px Arial`;
-    ctx.fillStyle = '#aaa';
-    ctx.fillText('← Change Character', cx, panelY + panelH + Math.round(H*0.045));
-    UI.customize = {x:panelX, y:panelY+panelH+Math.round(H*0.025), w:panelW, h:Math.round(H*0.04)};
+    // Change Character (purple, same size)
+    menuBtn(bx1, by2, bw1, bh, 12, '#5b2c8d', '#9b59b6', mouseX>bx1&&mouseX<bx1+bw1&&mouseY>by2&&mouseY<by2+bh);
+    ctx.font=`bold ${Math.min(Math.round(H*0.026),22)}px Arial`;
+    ctx.fillStyle='white';
+    ctx.shadowColor='rgba(0,0,0,0.4)'; ctx.shadowBlur=4;
+    ctx.fillText('🎨  Change Character', cx, by2+bh/2);
+    ctx.shadowBlur=0;
+    UI.customize = {x:bx1,y:by2,w:bw1,h:bh};
 
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha=1;
 }
 
 // ─── HIT TEST ────────────────────────────────────────────────────
@@ -810,7 +850,9 @@ function handleInput(e) {
     const {x,y} = canvasXY(e);
 
     if (state === 'MENU') {
-        mBird.vy = FLAP_V;
+        if (hits('menuPlay',      x, y)) { startGame();           return; }
+        if (hits('menuCustomize', x, y)) { state = 'CUSTOMIZER';  return; }
+        mBirdFlapTimer = 12; // visual flap bounce
         return;
     }
 
