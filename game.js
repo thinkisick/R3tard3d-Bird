@@ -715,7 +715,7 @@ function drawMenu() {
     ctx.font = `bold ${Math.round(H * 0.028)}px Arial`;
     ctx.fillStyle = 'white';
     ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 5;
-    ctx.fillText('🎨  CUSTOMIZE', W / 2, by2 + bh / 2);
+    ctx.fillText('🎨  Customize Your R3tard', W / 2, by2 + bh / 2);
     ctx.shadowBlur = 0;
     UI.menuCustomize = { x: bx, y: by2, w: bw, h: bh };
 
@@ -1157,8 +1157,8 @@ function drawDead() {
     ctx.font = `bold ${Math.min(Math.round(H * 0.022), 18)}px Arial`;
     ctx.fillStyle = 'white';
     ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 4;
-    ctx.fillText('🎨 Change', bxR + bwEa / 2, bby + bh * 0.38);
-    ctx.fillText('Character', bxR + bwEa / 2, bby + bh * 0.72);
+    ctx.fillText('Change Your', bxR + bwEa / 2, bby + bh * 0.38);
+    ctx.fillText('R3tard', bxR + bwEa / 2, bby + bh * 0.72);
     ctx.shadowBlur = 0;
     UI.customize = { x: bxR, y: bby, w: bwEa, h: bh };
 
