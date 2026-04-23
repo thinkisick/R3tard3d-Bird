@@ -64,6 +64,7 @@ function revealGame() {
     setTimeout(() => { ls.style.display = 'none'; }, 500);
     demo.init();
     state = 'MENU';
+    lbFetch(); // populate leaderboard from localStorage (and Firebase if configured)
     // try autoplay immediately; browsers may block until first interaction
     startMusicOnce();
 }
@@ -219,6 +220,53 @@ const demo = {
         }
     }
 };
+
+// ─── LEADERBOARD ─────────────────────────────────────────────────
+// Fill in your Firebase Realtime Database URL to enable global leaderboard.
+// Steps: console.firebase.google.com → create project → Realtime Database
+// → start in test mode → copy the URL (ends with .firebaseio.com)
+const FIREBASE_URL = '';   // e.g. 'https://my-game-abc123-default-rtdb.firebaseio.com'
+
+let lbData      = [];      // [{nickname, score}, ...] top 10
+let nicknameInput = '';    // current text being typed
+
+function lbSavedNick() { return localStorage.getItem('r3b_nick') || ''; }
+
+function lbAddLocal(nick, sc) {
+    const local = JSON.parse(localStorage.getItem('r3b_lb') || '{}');
+    if (!local[nick] || local[nick].score < sc)
+        local[nick] = { nickname: nick, score: sc };
+    localStorage.setItem('r3b_lb', JSON.stringify(local));
+    lbData = Object.values(local).sort((a,b)=>b.score-a.score).slice(0,10);
+}
+
+async function lbSubmit(nick, sc) {
+    if (!nick || sc <= 0) return;
+    localStorage.setItem('r3b_nick', nick);
+    lbAddLocal(nick, sc);
+    if (!FIREBASE_URL) return;
+    try {
+        await fetch(`${FIREBASE_URL}/lb/${encodeURIComponent(nick)}.json`, {
+            method: 'PUT',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ nickname: nick, score: sc, ts: Date.now() })
+        });
+        lbFetch();
+    } catch(e) {}
+}
+
+async function lbFetch() {
+    // always refresh local
+    const local = JSON.parse(localStorage.getItem('r3b_lb') || '{}');
+    lbData = Object.values(local).sort((a,b)=>b.score-a.score).slice(0,10);
+    if (!FIREBASE_URL) return;
+    try {
+        const r = await fetch(`${FIREBASE_URL}/lb.json?orderBy="score"&limitToLast=10`);
+        const d = await r.json();
+        if (d && typeof d === 'object')
+            lbData = Object.values(d).sort((a,b)=>b.score-a.score).slice(0,10);
+    } catch(e) {}
+}
 
 // ─── SCREEN CRACKS ───────────────────────────────────────────────
 const cracks = [];
@@ -536,11 +584,42 @@ function drawMenu() {
     ctx.shadowBlur = 0;
     UI.menuCustomize = { x: bx, y: by2, w: bw, h: bh };
 
-    // best score below buttons
+    // best score + leaderboard below buttons
+    const lbY0 = by2 + bh + Math.round(H * 0.045);
     if (best > 0) {
         ctx.font = `bold ${Math.round(H * 0.022)}px Arial`;
         ctx.fillStyle = '#FFD700';
-        ctx.fillText(`🏆  Best: ${best}`, W / 2, by2 + bh + Math.round(H * 0.055));
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(`🏆  Best: ${best}`, W / 2, lbY0);
+    }
+
+    // leaderboard panel
+    if (lbData.length > 0) {
+        const show   = Math.min(lbData.length, 5);
+        const rowH2  = Math.round(H * 0.038);
+        const panW   = Math.min(W * 0.68, 400);
+        const panH   = rowH2 * (show + 1) + 14;
+        const panX   = W / 2 - panW / 2;
+        const panY   = lbY0 + Math.round(H * 0.038);
+        rr(panX, panY, panW, panH, 14, 'rgba(0,0,20,0.72)', 'rgba(120,80,220,0.55)', 1.5);
+
+        ctx.font = `bold ${Math.round(H * 0.019)}px Arial`;
+        ctx.fillStyle = 'rgba(200,160,255,0.9)';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('LEADERBOARD', W / 2, panY + rowH2 * 0.6);
+
+        const medals = ['🥇','🥈','🥉'];
+        for (let i = 0; i < show; i++) {
+            const ey = panY + rowH2 * (i + 1) + 8;
+            const entry = lbData[i];
+            const medal = medals[i] || `${i+1}.`;
+            ctx.font = `bold ${Math.round(H * 0.018)}px Arial`;
+            ctx.textAlign = 'left'; ctx.fillStyle = i === 0 ? '#FFD700' : '#ddd';
+            ctx.fillText(`${medal} ${entry.nickname}`, panX + 18, ey + rowH2 / 2);
+            ctx.textAlign = 'right'; ctx.fillStyle = i === 0 ? '#FFD700' : '#bbb';
+            ctx.fillText(entry.score, panX + panW - 18, ey + rowH2 / 2);
+        }
+        ctx.textAlign = 'center';
     }
 }
 
@@ -685,7 +764,7 @@ function drawCustomizer() {
     // ── trait rows ──
     const selY0 = pY + pSz + Math.round(H*0.022);
     const rowH  = Math.round(H*0.088);
-    const AW    = Math.round(W*0.095);
+    const AW    = Math.min(Math.round(rowH*0.95), 58); // fixed-size arrows, not screen-fraction
     const AH    = Math.round(rowH*0.72);
     const pad   = Math.round(W*0.032);
     const fs    = Math.round(H*0.024);
@@ -699,18 +778,19 @@ function drawCustomizer() {
         ctx.fillStyle = accent;
         ctx.beginPath(); ctx.roundRect(pad, ry, 4, rowH-6, [10,0,0,10]); ctx.fill();
 
-        // category label
-        ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+        // small label top-left (inside row, outside arrow zone)
+        const labelX = pad + AW + 18;
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
         ctx.font = `bold ${Math.round(H*0.014)}px Arial`;
         ctx.fillStyle = accent;
-        ctx.fillText(CAT_LABELS[cat], pad+16, ry+7);
+        ctx.fillText(CAT_LABELS[cat], labelX, ry + rowH*0.3);
 
-        // trait name (bright, bold)
+        // trait name centered (bright, bold)
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.font = `bold ${fs}px Arial`;
         ctx.fillStyle = 'white';
         ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=4;
-        ctx.fillText(TRAITS[cat][sel[cat]], cx, ry+rowH/2-2);
+        ctx.fillText(TRAITS[cat][sel[cat]], cx, ry+rowH/2+2);
         ctx.shadowBlur=0;
 
         // left arrow button
@@ -933,7 +1013,85 @@ function drawDead() {
     ctx.shadowBlur = 0;
     UI.customize = { x: bxR, y: bby, w: bwEa, h: bh };
 
+    // ── Save Score row (appears below buttons, after short delay) ──
+    if (score > 0) {
+        const saveA = easeOut(Math.max(deadTimer - 45, 0), 14);
+        ctx.globalAlpha = Math.min(saveA, 1);
+        const savedNick = lbSavedNick();
+        const saveY = bby + bh + Math.round(panelH * 0.04);
+        const saveFull = panelW * 0.86, saveBx = panelX + bpad;
+        if (savedNick) {
+            // auto-submit was done; show confirmation
+            ctx.font=`${Math.round(H*0.019)}px Arial`; ctx.textAlign='center'; ctx.textBaseline='middle';
+            ctx.fillStyle='rgba(46,204,113,0.85)';
+            ctx.fillText(`✓ Saved as "${savedNick}"  ·  tap to change`, cx, saveY + bh*0.38);
+            UI.nickChange = {x:saveBx, y:saveY, w:saveFull, h:bh*0.6};
+        } else {
+            const hovSave = mouseX>saveBx&&mouseX<saveBx+saveFull&&mouseY>saveY&&mouseY<saveY+bh*0.75;
+            menuBtn(saveBx, saveY, saveFull, bh*0.75, 10, '#1a1a35', '#9b59b6', hovSave);
+            ctx.font=`bold ${Math.round(H*0.02)}px Arial`; ctx.textAlign='center'; ctx.textBaseline='middle';
+            ctx.fillStyle='rgba(200,160,255,0.9)';
+            ctx.fillText('📝  Enter name to save score', cx, saveY + bh*0.375);
+            UI.nickOpen = {x:saveBx, y:saveY, w:saveFull, h:bh*0.75};
+        }
+    }
+
     ctx.globalAlpha = 1;
+}
+
+// ─── DRAW: NICKNAME ENTRY ────────────────────────────────────────
+function drawNickname() {
+    const W = canvas.width, H = canvas.height, cx = W/2;
+
+    // dark overlay over whatever is behind
+    ctx.fillStyle = 'rgba(0,0,0,0.84)';
+    ctx.fillRect(0, 0, W, H);
+
+    const pw = Math.min(W * 0.72, 460);
+    const ph = Math.round(H * 0.38);
+    const px = cx - pw/2, py = H * 0.31;
+
+    // panel
+    rr(px, py, pw, ph, 20, '#0d0d1e', null);
+    const tg2 = ctx.createLinearGradient(px, py, px+pw, py);
+    tg2.addColorStop(0,'rgba(155,89,182,0)'); tg2.addColorStop(0.5,'rgba(155,89,182,0.9)'); tg2.addColorStop(1,'rgba(155,89,182,0)');
+    ctx.fillStyle=tg2; ctx.fillRect(px, py, pw, 2);
+
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.font=`bold ${Math.round(H*0.036)}px Arial`;
+    ctx.fillStyle='white';
+    ctx.fillText('ENTER YOUR NAME', cx, py + ph*0.2);
+
+    // input box
+    const iw = pw*0.82, ih = Math.round(H*0.072);
+    const ix = cx - iw/2, iy = py + ph*0.38;
+    rr(ix, iy, iw, ih, 12, '#17172a', '#9b59b6', 2.5);
+    const cursor = Math.floor(Date.now()/520)%2 ? '|' : '';
+    ctx.font=`${Math.round(H*0.034)}px 'Press Start 2P', monospace`;
+    ctx.fillStyle='white';
+    ctx.fillText((nicknameInput || '') + cursor, cx, iy + ih/2);
+
+    ctx.font=`${Math.round(H*0.017)}px Arial`;
+    ctx.fillStyle='rgba(255,255,255,0.45)';
+    ctx.fillText('type your name  ·  max 16 chars', cx, py + ph*0.66);
+
+    // buttons
+    const bh2 = Math.round(ph*0.16);
+    const bw2 = pw*0.36;
+    const by2 = py + ph*0.78;
+    const bxSkip = cx - bw2 - 10, bxSave = cx + 10;
+
+    const hovSkip = mouseX>bxSkip&&mouseX<bxSkip+bw2&&mouseY>by2&&mouseY<by2+bh2;
+    menuBtn(bxSkip, by2, bw2, bh2, 10, '#222240', '#666699', hovSkip);
+    ctx.fillStyle=hovSkip?'white':'rgba(255,255,255,0.6)'; ctx.font=`bold ${Math.round(H*0.022)}px Arial`;
+    ctx.fillText('SKIP', bxSkip+bw2/2, by2+bh2/2);
+    UI.nickSkip = {x:bxSkip, y:by2, w:bw2, h:bh2};
+
+    const hovSave = mouseX>bxSave&&mouseX<bxSave+bw2&&mouseY>by2&&mouseY<by2+bh2;
+    menuBtn(bxSave, by2, bw2, bh2, 10, '#5b2c8d', '#9b59b6', hovSave);
+    ctx.fillStyle='white';
+    ctx.fillText('SAVE ↵', bxSave+bw2/2, by2+bh2/2);
+    UI.nickSave = {x:bxSave, y:by2, w:bw2, h:bh2};
 }
 
 // ─── HIT TEST ────────────────────────────────────────────────────
@@ -983,10 +1141,42 @@ function handleInput(e) {
     if (state === 'DEAD') {
         if (hits('restart',   x, y)) { startGame(); return; }
         if (hits('customize', x, y)) { state = 'CUSTOMIZER'; return; }
+        if (hits('nickOpen',  x, y)) { nicknameInput = lbSavedNick(); state = 'NICKNAME'; return; }
+        if (hits('nickChange',x, y)) { nicknameInput = lbSavedNick(); state = 'NICKNAME'; return; }
+    }
+
+    if (state === 'NICKNAME') {
+        if (hits('nickSkip', x, y)) { state = 'DEAD'; return; }
+        if (hits('nickSave', x, y)) {
+            const nick = nicknameInput.trim().slice(0, 20);
+            if (nick) { lbSubmit(nick, score); }
+            state = 'DEAD';
+            return;
+        }
     }
 }
 
 function handleKey(e) {
+    if (state === 'NICKNAME') {
+        if (e.key === 'Backspace') {
+            e.preventDefault();
+            nicknameInput = nicknameInput.slice(0, -1);
+            return;
+        }
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const nick = nicknameInput.trim().slice(0, 20);
+            if (nick) lbSubmit(nick, score);
+            state = 'DEAD';
+            return;
+        }
+        if (e.key === 'Escape') { state = 'DEAD'; return; }
+        if (e.key.length === 1 && nicknameInput.length < 20) {
+            nicknameInput += e.key;
+        }
+        return;
+    }
+
     if (e.code === 'Space' || e.code === 'ArrowUp') {
         e.preventDefault();
         if (state === 'MENU')        { demo.bird.vy = FLAP_V; return; }
@@ -1021,6 +1211,9 @@ function killBird() {
         best = score;
         localStorage.setItem('r3b_best', best);
     }
+    // auto-submit if player has a saved nickname
+    const savedNick = lbSavedNick();
+    if (savedNick && score > 0) lbSubmit(savedNick, score);
 }
 
 // ─── MAIN LOOP ───────────────────────────────────────────────────
@@ -1039,6 +1232,14 @@ function loop() {
         drawCustomizer();
     } else if (state === 'DYING') {
         drawDying();
+    } else if (state === 'NICKNAME') {
+        drawBackground(currentBg);
+        drawPipes();
+        drawGround();
+        bird.draw(null, null, null, false, null);
+        drawScore();
+        drawDead();
+        drawNickname();
     } else {
         drawBackground(currentBg);
         drawPipes();
