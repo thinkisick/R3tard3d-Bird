@@ -106,13 +106,13 @@ const PIPE_INT = 95;
 
 // ─── WORLD TIERS ─────────────────────────────────────────────────
 const TIERS = [
-    { min:0,  label:'',            tint: null,                   pc:'#4CAF50', pd:'#388E3C' },
-    { min:10, label:'SUNSET 🌅',   tint:'rgba(255,80,0,0.15)',   pc:'#FF7043', pd:'#E64A19' },
-    { min:25, label:'NIGHT 🌙',    tint:'rgba(0,0,40,0.38)',     pc:'#1565C0', pd:'#0D47A1' },
-    { min:50, label:'🔥 HELL MODE',tint:'rgba(120,0,0,0.42)',    pc:'#B71C1C', pd:'#7F0000' },
+    { min:0,  tint: null,                   pc:'#4CAF50', pd:'#388E3C', gd:'#5d3a1a', gc:'#2e7d32', gc2:'#43a047' },
+    { min:10, tint:'rgba(255,80,0,0.15)',   pc:'#FF7043', pd:'#E64A19', gd:'#4e2000', gc:'#bf5000', gc2:'#e65100' },
+    { min:25, tint:'rgba(0,0,40,0.38)',     pc:'#1565C0', pd:'#0D47A1', gd:'#0d0d1e', gc:'#1a237e', gc2:'#283593' },
+    { min:50, tint:'rgba(120,0,0,0.42)',    pc:'#B71C1C', pd:'#7F0000', gd:'#1a0000', gc:'#7f0000', gc2:'#c62828' },
 ];
 let currentTier = 0;
-let tierNotif   = { text:'', timer:0 };
+let currentBg   = 0;
 
 // ─── SCORE POP ───────────────────────────────────────────────────
 let scoreAnim = 0;
@@ -143,28 +143,24 @@ const demo = {
         this.bird.vy = Math.min(this.bird.vy + GRAVITY_V, canvas.height * 0.022);
         this.bird.y += this.bird.vy;
 
-        // find next pipe the bird needs to pass through
+        // natural arc AI: flap once when falling below the gap center — no oscillation
         const next = this.pipes.find(p => p.x + PIPEW > BIRDX - BIRDR);
         if (next) {
-            const gapTop    = next.topH + BIRDR * 1.8;
-            const gapBot    = next.topH + PIPEGAP - BIRDR * 1.8;
-            const gapCenter = (gapTop + gapBot) * 0.5;
-            // aggressively aim for gap center
-            if (this.bird.y > gapCenter || this.bird.vy > 0) {
-                if (this.bird.y > gapCenter - canvas.height * 0.04) {
-                    this.bird.vy = FLAP_V * 0.92;
-                }
+            const gapMid = next.topH + PIPEGAP * 0.5;
+            // only flap while falling (vy positive-ish), not while already shooting up
+            if (this.bird.vy > -FLAP_V * 0.12 && this.bird.y > gapMid - BIRDR * 0.5) {
+                this.bird.vy = FLAP_V;
             }
-            // emergency snap: if bird is inside pipe X and outside the gap, warp to center
-            const inPipeX = next.x < BIRDX + BIRDR && next.x + PIPEW > BIRDX - BIRDR;
-            if (inPipeX && (this.bird.y < next.topH + BIRDR || this.bird.y > next.topH + PIPEGAP - BIRDR)) {
-                this.bird.y += (gapCenter - this.bird.y) * 0.35;
-                this.bird.vy = FLAP_V * 0.5;
+            // emergency safety snap (rarely needed with above logic)
+            const inX = next.x < BIRDX + BIRDR && next.x + PIPEW > BIRDX - BIRDR;
+            if (inX && (this.bird.y < next.topH + BIRDR || this.bird.y > next.topH + PIPEGAP - BIRDR)) {
+                this.bird.y  += (gapMid - this.bird.y) * 0.4;
+                this.bird.vy  = FLAP_V * 0.7;
             }
         } else {
-            // no pipe ahead: drift gently back to centre
-            if (this.bird.y > canvas.height * 0.52 || this.bird.vy > canvas.height * 0.008) {
-                this.bird.vy = FLAP_V * 0.88;
+            // no pipe: gently hover around screen centre — flap only when falling
+            if (this.bird.vy > -FLAP_V * 0.12 && this.bird.y > canvas.height * 0.52) {
+                this.bird.vy = FLAP_V;
             }
         }
 
@@ -174,8 +170,8 @@ const demo = {
             this.bird.y = canvas.height - GH - BIRDR * 2;
             this.bird.vy = FLAP_V;
         }
-        // scrolling pipes — slightly more spread out than real game so AI looks clean
-        if (++this.timer >= Math.round(PIPE_INT * 1.35)) {
+        // pipes — 1.4× spacing so the bird always looks confident
+        if (++this.timer >= Math.round(PIPE_INT * 1.4)) {
             const minH = GH + 60, maxH = canvas.height - GH - PIPEGAP - minH;
             this.pipes.push({ x: canvas.width + 10, topH: minH + Math.random() * maxH });
             this.timer = 0;
@@ -301,11 +297,11 @@ function updatePipes() {
             scoreAnim = 18;
             plusOneY  = canvas.height * 0.14;
             plusOneT  = 20;
-            // check tier change
+            // check tier change — randomise background, tint ground colour
             const newTierIdx = TIERS.reduce((acc,t,i)=> score>=t.min?i:acc, 0);
             if (newTierIdx !== currentTier) {
                 currentTier = newTierIdx;
-                tierNotif = { text: TIERS[currentTier].label, timer: 90 };
+                currentBg   = Math.floor(Math.random() * TRAITS.backgrounds.length);
             }
         }
         if (pipes[i].x + PIPEW < -5) pipes.splice(i, 1);
@@ -418,15 +414,13 @@ function menuBtn(x, y, w, h, r, color, glowColor, hovered) {
     ctx.strokeStyle = glowColor; ctx.lineWidth = hovered?2.5:1.5; ctx.stroke();
 }
 
-function drawMenu() {
+// Draws the live game world (selected bg + demo pipes + ground + flying bird)
+// then applies a dark overlay+vignette so UI drawn on top stays readable.
+// overlayAlpha: 0.54 for menu (lighter), 0.72 for customizer (heavier)
+function drawDemoWorld(overlayAlpha) {
     const W = canvas.width, H = canvas.height;
-    menuTimer++;
-    demo.update();
+    drawBackground(); // uses sel.backgrounds — updates live as user picks a bg
 
-    // ── full game world in background ──
-    drawBackground();
-
-    // demo pipes (always normal green tier)
     const t0 = TIERS[0];
     for (const p of demo.pipes) {
         ctx.fillStyle = t0.pc;
@@ -444,21 +438,24 @@ function drawMenu() {
         ctx.fillRect(p.x + 6, p.topH + PIPEGAP + 22, 12, H);
     }
 
-    drawGround();
+    drawGround(true); // always normal green in demo
 
-    // demo bird — no bg layer (full-screen NFT bg already drawn, avoids clip-edge outline)
-    const dRot = Math.max(-25, Math.min(90, demo.bird.vy / GRAVITY_V * 3.3));
+    const dRot = Math.max(-22, Math.min(70, demo.bird.vy / GRAVITY_V * 2.8));
     bird.draw(BIRDX, demo.bird.y, dRot, false, null);
 
-    // ── dark overlay so UI is readable ──
-    ctx.fillStyle = 'rgba(0,0,0,0.54)';
+    ctx.fillStyle = `rgba(0,0,0,${overlayAlpha})`;
     ctx.fillRect(0, 0, W, H);
-
-    // radial vignette — darker at edges
     const vig = ctx.createRadialGradient(W / 2, H / 2, H * 0.16, W / 2, H / 2, H * 0.86);
     vig.addColorStop(0, 'rgba(0,0,0,0.05)');
     vig.addColorStop(1, 'rgba(0,0,0,0.72)');
     ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
+}
+
+function drawMenu() {
+    const W = canvas.width, H = canvas.height;
+    menuTimer++;
+    demo.update();
+    drawDemoWorld(0.52);
 
     // ── pixel title ──
     const ts = Math.min(Math.round(W * 0.038), 32);
@@ -500,8 +497,10 @@ function drawMenu() {
 }
 
 // ─── DRAW: GAME ELEMENTS ─────────────────────────────────────────
-function drawBackground() {
-    const bgImg = IMG.backgrounds[TRAITS.backgrounds[sel.backgrounds]];
+// bgIdx: which background index to draw (defaults to sel.backgrounds for menu/customizer)
+function drawBackground(bgIdx) {
+    const idx   = bgIdx !== undefined ? bgIdx : sel.backgrounds;
+    const bgImg = IMG.backgrounds[TRAITS.backgrounds[idx]];
     if (imgReady(bgImg)) {
         ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height - GH);
     } else {
@@ -510,23 +509,11 @@ function drawBackground() {
         ctx.fillStyle = g;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
-    // world tier tint overlay
+    // world tier tint overlay (only applies in-game; 0 tint on tier 0)
     const t = getTier();
     if (t.tint) {
         ctx.fillStyle = t.tint;
         ctx.fillRect(0, 0, canvas.width, canvas.height - GH);
-    }
-    // tier notification
-    if (tierNotif.timer > 0) {
-        tierNotif.timer--;
-        const a = tierNotif.timer > 70 ? (90-tierNotif.timer)/20 : tierNotif.timer/70;
-        ctx.globalAlpha = Math.min(a,1);
-        ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.font=`bold ${Math.round(canvas.height*0.042)}px Arial`;
-        ctx.fillStyle='white';
-        ctx.shadowColor='rgba(0,0,0,0.8)'; ctx.shadowBlur=12;
-        ctx.fillText(tierNotif.text, canvas.width/2, canvas.height*0.22);
-        ctx.shadowBlur=0; ctx.globalAlpha=1;
     }
 }
 
@@ -554,13 +541,14 @@ function drawPipes() {
     }
 }
 
-function drawGround() {
-    ctx.fillStyle = '#5d3a1a';
-    ctx.fillRect(0, canvas.height - GH, canvas.width, GH);
-    ctx.fillStyle = '#2e7d32';
-    ctx.fillRect(0, canvas.height - GH, canvas.width, 18);
-    ctx.fillStyle = '#43a047';
+function drawGround(forceNormal) {
+    const t   = forceNormal ? TIERS[0] : getTier();
     const off = (frameCount * PIPESPD) % 44;
+    ctx.fillStyle = t.gd;
+    ctx.fillRect(0, canvas.height - GH, canvas.width, GH);
+    ctx.fillStyle = t.gc;
+    ctx.fillRect(0, canvas.height - GH, canvas.width, 18);
+    ctx.fillStyle = t.gc2;
     for (let gx = -off; gx < canvas.width + 44; gx += 44) {
         ctx.beginPath(); ctx.arc(gx+10, canvas.height-GH, 9, Math.PI, 0); ctx.fill();
         ctx.beginPath(); ctx.arc(gx+28, canvas.height-GH, 7, Math.PI, 0); ctx.fill();
@@ -602,9 +590,8 @@ function rr(x, y, w, h, r, fill, stroke, lw) {
 }
 
 function drawCustomizer() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#07070f';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    demo.update();
+    drawDemoWorld(0.72); // heavier overlay so customizer UI stays crisp
 
     const W = canvas.width, H = canvas.height, cx = W/2;
 
@@ -939,7 +926,7 @@ function startGame() {
     score        = 0;
     prevScore    = 0;
     currentTier  = 0;
-    tierNotif    = { text:'', timer:0 };
+    currentBg    = sel.backgrounds;
     pipes        = [];
     pipeTimer    = PIPE_INT - 28;
     bird.reset();
@@ -973,7 +960,7 @@ function loop() {
     } else if (state === 'DYING') {
         drawDying();
     } else {
-        drawBackground();
+        drawBackground(currentBg);
         drawPipes();
         drawGround();
         bird.draw(null, null, null, false, null);
