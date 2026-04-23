@@ -62,6 +62,7 @@ function revealGame() {
     const ls = document.getElementById('loading-screen');
     ls.style.opacity = '0';
     setTimeout(() => { ls.style.display = 'none'; }, 500);
+    demo.init();
     state = 'MENU';
 }
 
@@ -126,6 +127,45 @@ function initMenuBird() {
     mBird.y  = canvas.height * 0.5;
     mBird.vy = 0;
 }
+
+// ─── MENU DEMO (live background gameplay) ────────────────────────
+const demo = {
+    bird: { y: 0, vy: 0 },
+    pipes: [],
+    timer: 60,
+    init() {
+        this.bird.y  = canvas.height * 0.45;
+        this.bird.vy = 0;
+        this.pipes   = [];
+        this.timer   = 60;
+    },
+    update() {
+        this.bird.vy = Math.min(this.bird.vy + GRAVITY_V, canvas.height * 0.022);
+        this.bird.y += this.bird.vy;
+        // simple AI: aim for gap centre of next pipe, else hover at 45%
+        const next = this.pipes.find(p => p.x + PIPEW > BIRDX - BIRDR);
+        const target = next ? next.topH + PIPEGAP * 0.5 : canvas.height * 0.45;
+        if (this.bird.y > target - BIRDR * 1.5 && this.bird.vy > -FLAP_V * 0.2) {
+            this.bird.vy = FLAP_V;
+        }
+        // guard edges
+        if (this.bird.y < BIRDR * 2) { this.bird.y = BIRDR * 2; this.bird.vy = 0; }
+        if (this.bird.y > canvas.height - GH - BIRDR * 2) {
+            this.bird.y = canvas.height - GH - BIRDR * 2;
+            this.bird.vy = FLAP_V;
+        }
+        // scrolling pipes
+        if (++this.timer >= PIPE_INT) {
+            const minH = GH + 50, maxH = canvas.height - GH - PIPEGAP - minH;
+            this.pipes.push({ x: canvas.width + 10, topH: minH + Math.random() * maxH });
+            this.timer = 0;
+        }
+        for (let i = this.pipes.length - 1; i >= 0; i--) {
+            this.pipes[i].x -= PIPESPD;
+            if (this.pipes[i].x + PIPEW < -20) this.pipes.splice(i, 1);
+        }
+    }
+};
 
 // ─── SCREEN CRACKS ───────────────────────────────────────────────
 const cracks = [];
@@ -361,103 +401,81 @@ function menuBtn(x, y, w, h, r, color, glowColor, hovered) {
 function drawMenu() {
     const W = canvas.width, H = canvas.height;
     menuTimer++;
-    updateMenuBird();
+    demo.update();
 
-    // NFT background + heavy dark vignette
+    // ── full game world in background ──
     drawBackground();
-    ctx.fillStyle = 'rgba(0,0,0,0.52)';
-    ctx.fillRect(0, 0, W, H);
 
-    // radial vignette — dark edges
-    const vig = ctx.createRadialGradient(W/2,H/2,H*0.15,W/2,H/2,H*0.88);
-    vig.addColorStop(0,'rgba(0,0,0,0)');
-    vig.addColorStop(1,'rgba(0,0,0,0.72)');
-    ctx.fillStyle=vig; ctx.fillRect(0,0,W,H);
+    // demo pipes (always normal green tier)
+    const t0 = TIERS[0];
+    for (const p of demo.pipes) {
+        ctx.fillStyle = t0.pc;
+        ctx.fillRect(p.x, 0, PIPEW, p.topH - 22);
+        ctx.fillStyle = t0.pd;
+        ctx.fillRect(p.x - 7, p.topH - 22, PIPEW + 14, 22);
+        ctx.fillStyle = 'rgba(255,255,255,0.1)';
+        ctx.fillRect(p.x + 6, 0, 12, p.topH - 22);
+
+        ctx.fillStyle = t0.pc;
+        ctx.fillRect(p.x, p.topH + PIPEGAP + 22, PIPEW, H);
+        ctx.fillStyle = t0.pd;
+        ctx.fillRect(p.x - 7, p.topH + PIPEGAP, PIPEW + 14, 22);
+        ctx.fillStyle = 'rgba(255,255,255,0.1)';
+        ctx.fillRect(p.x + 6, p.topH + PIPEGAP + 22, 12, H);
+    }
 
     drawGround();
 
+    // demo bird (your selected character plays by itself)
+    const dRot = Math.max(-25, Math.min(90, demo.bird.vy / GRAVITY_V * 3.3));
+    bird.draw(BIRDX, demo.bird.y, dRot, true, null);
+
+    // ── dark overlay so UI is readable ──
+    ctx.fillStyle = 'rgba(0,0,0,0.54)';
+    ctx.fillRect(0, 0, W, H);
+
+    // radial vignette — darker at edges
+    const vig = ctx.createRadialGradient(W / 2, H / 2, H * 0.16, W / 2, H / 2, H * 0.86);
+    vig.addColorStop(0, 'rgba(0,0,0,0.05)');
+    vig.addColorStop(1, 'rgba(0,0,0,0.72)');
+    ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
+
     // ── pixel title ──
-    const ts = Math.min(Math.round(W*0.038),32);
-    drawPixelTitle(W/2, H*0.11, ts, true);
+    const ts = Math.min(Math.round(W * 0.038), 32);
+    drawPixelTitle(W / 2, H * 0.2, ts, true);
 
-    // ── LEFT ZONE: character card ──
-    const cz = { x: W*0.04, y: H*0.22, w: W*0.42, h: H*0.58 };
-    ctx.beginPath(); ctx.roundRect(cz.x,cz.y,cz.w,cz.h,20);
-    ctx.fillStyle='rgba(0,0,0,0.38)'; ctx.fill();
-    ctx.strokeStyle='rgba(255,255,255,0.08)'; ctx.lineWidth=1; ctx.stroke();
+    // ── centered buttons ──
+    const bw   = Math.min(W * 0.52, 340);
+    const bh   = Math.min(Math.round(H * 0.13), 82);
+    const bx   = W / 2 - bw / 2;
+    const gap  = Math.round(H * 0.032);
+    const by1  = H * 0.44, by2 = by1 + bh + gap;
 
-    // "YOUR BIRD" label
-    ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.font=`bold ${Math.round(H*0.018)}px Arial`;
-    ctx.fillStyle='rgba(255,255,255,0.4)';
-    ctx.fillText('YOUR BIRD', cz.x+cz.w/2, cz.y+cz.h*0.1);
+    const hovPlay = mouseX > bx && mouseX < bx + bw && mouseY > by1 && mouseY < by1 + bh;
+    const hovCust = mouseX > bx && mouseX < bx + bw && mouseY > by2 && mouseY < by2 + bh;
 
-    // floating particles around character
-    const pcx = mBird.x, pcy = mBird.y;
-    const pR2  = Math.min(BIRDR*2.2,60);
-    for (let i=0;i<6;i++) {
-        const a = (i/6)*Math.PI*2 + frameCount*0.03*(i%2?1:-1);
-        const r = pR2 + Math.sin(frameCount*0.07+i)*8;
-        const px2= pcx+Math.cos(a)*r, py2=pcy+Math.sin(a)*r;
-        ctx.beginPath(); ctx.arc(px2,py2,3+Math.sin(frameCount*0.1+i)*1.5,0,Math.PI*2);
-        ctx.fillStyle=`hsla(${(frameCount*2+i*60)%360},80%,70%,0.7)`;
-        ctx.fill();
-    }
+    menuBtn(bx, by1, bw, bh, 14, '#1e8449', '#2ecc71', hovPlay);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `bold ${Math.round(H * 0.034)}px Arial`;
+    ctx.fillStyle = 'white';
+    ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 5;
+    ctx.fillText('▶  PLAY', W / 2, by1 + bh / 2);
+    ctx.shadowBlur = 0;
+    UI.menuPlay = { x: bx, y: by1, w: bw, h: bh };
 
-    // character glow ring
-    const glR = ctx.createRadialGradient(pcx,pcy,BIRDR,pcx,pcy,BIRDR*2.5);
-    glR.addColorStop(0,'rgba(255,255,255,0.18)');
-    glR.addColorStop(1,'rgba(255,255,255,0)');
-    ctx.fillStyle=glR; ctx.beginPath(); ctx.arc(pcx,pcy,BIRDR*2.5,0,Math.PI*2); ctx.fill();
+    menuBtn(bx, by2, bw, bh, 14, '#5b2c8d', '#9b59b6', hovCust);
+    ctx.font = `bold ${Math.round(H * 0.03)}px Arial`;
+    ctx.fillStyle = 'white';
+    ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 5;
+    ctx.fillText('🎨  CUSTOMIZE', W / 2, by2 + bh / 2);
+    ctx.shadowBlur = 0;
+    UI.menuCustomize = { x: bx, y: by2, w: bw, h: bh };
 
-    // character
-    const mRot = mBirdFlapTimer>0 ? -18 : Math.sin(frameCount*0.055)*8;
-    bird.draw(pcx, pcy, mRot, true, null);
-
-    // "CLICK TO FLAP" hint inside card
-    const pls = 0.5+0.5*Math.abs(Math.sin(frameCount*0.06));
-    ctx.globalAlpha=pls*0.7;
-    ctx.font=`${Math.round(H*0.016)}px Arial`;
-    ctx.fillStyle='white';
-    ctx.fillText('click to flap', cz.x+cz.w/2, cz.y+cz.h*0.88);
-    ctx.globalAlpha=1;
-
-    // ── RIGHT ZONE: buttons ──
-    const bx  = W*0.52, bw = W*0.44;
-    const btnH = Math.min(Math.round(H*0.14), 90);
-    const gap  = Math.round(H*0.035);
-    const by1  = H*0.33, by2 = by1+btnH+gap;
-
-    const hovPlay = mouseX>bx&&mouseX<bx+bw&&mouseY>by1&&mouseY<by1+btnH;
-    const hovCust = mouseX>bx&&mouseX<bx+bw&&mouseY>by2&&mouseY<by2+btnH;
-
-    menuBtn(bx, by1, bw, btnH, 14, '#1e8449', '#2ecc71', hovPlay);
-    ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.font=`bold ${Math.round(H*0.032)}px Arial`;
-    ctx.fillStyle='white';
-    ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=4;
-    ctx.fillText('▶  PLAY', bx+bw/2, by1+btnH/2);
-    ctx.shadowBlur=0;
-    UI.menuPlay = {x:bx,y:by1,w:bw,h:btnH};
-
-    menuBtn(bx, by2, bw, btnH, 14, '#5b2c8d', '#9b59b6', hovCust);
-    ctx.font=`bold ${Math.round(H*0.028)}px Arial`;
-    ctx.fillStyle='white';
-    ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=4;
-    ctx.fillText('🎨  CUSTOMIZE', bx+bw/2, by2+btnH/2);
-    ctx.shadowBlur=0;
-    UI.menuCustomize = {x:bx,y:by2,w:bw,h:btnH};
-
-    // tagline below buttons
-    ctx.font=`${Math.round(H*0.018)}px Arial`;
-    ctx.fillStyle='rgba(255,255,255,0.35)';
-    ctx.fillText('build your character →', bx+bw/2, by2+btnH+Math.round(H*0.03));
-
-    // best score
+    // best score below buttons
     if (best > 0) {
-        ctx.font=`bold ${Math.round(H*0.02)}px Arial`;
-        ctx.fillStyle='#FFD700';
-        ctx.fillText(`🏆  Best: ${best}`, bx+bw/2, by2+btnH+Math.round(H*0.07));
+        ctx.font = `bold ${Math.round(H * 0.022)}px Arial`;
+        ctx.fillStyle = '#FFD700';
+        ctx.fillText(`🏆  Best: ${best}`, W / 2, by2 + bh + Math.round(H * 0.055));
     }
 }
 
@@ -710,125 +728,126 @@ function drawDying() {
 // ─── DRAW: GAME OVER ─────────────────────────────────────────────
 function drawDead() {
     deadTimer++;
-    const W = canvas.width, H = canvas.height, cx = W/2;
+    const W = canvas.width, H = canvas.height, cx = W / 2;
 
     // dark red overlay
     const overlayA = easeOut(deadTimer, 20) * 0.68;
     ctx.fillStyle = `rgba(10,0,0,${overlayA})`;
     ctx.fillRect(0, 0, W, H);
 
-    // panel
-    const panelW = Math.min(Math.round(W*0.78), 440);
-    const panelH = Math.round(H*0.62);
-    const panelX = cx - panelW/2;
+    // panel — slightly taller so buttons never crowd stats
+    const panelW = Math.min(Math.round(W * 0.78), 440);
+    const panelH = Math.round(H * 0.68);
+    const panelX = cx - panelW / 2;
     const slideP = easeOutBack(deadTimer, 28);
-    const panelY = H*0.17 + (1 - Math.min(slideP,1)) * (-H*0.45);
+    const panelY = H * 0.14 + (1 - Math.min(slideP, 1)) * (-H * 0.45);
 
     // red glow behind panel
     ctx.save();
-    ctx.shadowColor = `rgba(220,0,0,${easeOut(deadTimer,25)*0.6})`;
+    ctx.shadowColor = `rgba(220,0,0,${easeOut(deadTimer, 25) * 0.6})`;
     ctx.shadowBlur  = 70;
     ctx.fillStyle   = 'rgba(0,0,0,0.01)';
-    ctx.fillRect(panelX+20, panelY+20, panelW-40, panelH-40);
+    ctx.fillRect(panelX + 20, panelY + 20, panelW - 40, panelH - 40);
     ctx.restore();
 
     // panel body
     rr(panelX, panelY, panelW, panelH, 22, '#0d0d1e', null);
-    // red left edge accent
-    ctx.fillStyle='#c0392b';
-    ctx.beginPath(); ctx.roundRect(panelX, panelY, 5, panelH, [22,0,0,22]); ctx.fill();
-    // top border glow line
-    const tg = ctx.createLinearGradient(panelX,panelY,panelX+panelW,panelY);
-    tg.addColorStop(0,'rgba(192,57,43,0)'); tg.addColorStop(0.5,'rgba(192,57,43,0.9)'); tg.addColorStop(1,'rgba(192,57,43,0)');
-    ctx.fillStyle=tg; ctx.fillRect(panelX, panelY, panelW, 2);
+    ctx.fillStyle = '#c0392b';
+    ctx.beginPath(); ctx.roundRect(panelX, panelY, 5, panelH, [22, 0, 0, 22]); ctx.fill();
+    const tg = ctx.createLinearGradient(panelX, panelY, panelX + panelW, panelY);
+    tg.addColorStop(0, 'rgba(192,57,43,0)'); tg.addColorStop(0.5, 'rgba(192,57,43,0.9)'); tg.addColorStop(1, 'rgba(192,57,43,0)');
+    ctx.fillStyle = tg; ctx.fillRect(panelX, panelY, panelW, 2);
 
-    const textA = easeOut(Math.max(deadTimer-6,0), 16);
-    ctx.globalAlpha = Math.min(textA,1);
+    const textA = easeOut(Math.max(deadTimer - 6, 0), 16);
+    ctx.globalAlpha = Math.min(textA, 1);
 
     // character face above panel
-    const faceR = Math.min(Math.round(H*0.075), 62);
-    const faceY = panelY - faceR*0.3;
-    // face glow
-    const fg = ctx.createRadialGradient(cx,faceY,0,cx,faceY,faceR*2);
-    fg.addColorStop(0,'rgba(192,57,43,0.35)'); fg.addColorStop(1,'rgba(0,0,0,0)');
-    ctx.fillStyle=fg; ctx.beginPath(); ctx.arc(cx,faceY,faceR*2,0,Math.PI*2); ctx.fill();
+    const faceR = Math.min(Math.round(H * 0.075), 62);
+    const faceY = panelY - faceR * 0.3;
+    const fg = ctx.createRadialGradient(cx, faceY, 0, cx, faceY, faceR * 2);
+    fg.addColorStop(0, 'rgba(192,57,43,0.35)'); fg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = fg; ctx.beginPath(); ctx.arc(cx, faceY, faceR * 2, 0, Math.PI * 2); ctx.fill();
     bird.draw(cx, faceY, 0, true, faceR);
-    ctx.save(); ctx.translate(cx,faceY);
-    ctx.beginPath(); ctx.arc(0,0,faceR+3,0,Math.PI*2);
-    ctx.strokeStyle='#e74c3c'; ctx.lineWidth=3; ctx.stroke();
+    ctx.save(); ctx.translate(cx, faceY);
+    ctx.beginPath(); ctx.arc(0, 0, faceR + 3, 0, Math.PI * 2);
+    ctx.strokeStyle = '#e74c3c'; ctx.lineWidth = 3; ctx.stroke();
     ctx.restore();
 
     // YOU DIED
-    ctx.textAlign='center'; ctx.textBaseline='middle';
-    const titleFS = Math.min(Math.round(H*0.068), 58);
-    ctx.font=`900 ${titleFS}px Arial`;
-    ctx.strokeStyle='rgba(0,0,0,0.8)'; ctx.lineWidth=titleFS*0.1;
-    ctx.strokeText('YOU DIED', cx, panelY+panelH*0.27);
-    ctx.fillStyle='#e74c3c'; ctx.fillText('YOU DIED', cx, panelY+panelH*0.27);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const titleFS = Math.min(Math.round(H * 0.068), 58);
+    ctx.font = `900 ${titleFS}px Arial`;
+    ctx.strokeStyle = 'rgba(0,0,0,0.8)'; ctx.lineWidth = titleFS * 0.1;
+    ctx.strokeText('YOU DIED', cx, panelY + panelH * 0.23);
+    ctx.fillStyle = '#e74c3c'; ctx.fillText('YOU DIED', cx, panelY + panelH * 0.23);
 
     // R3TARD
-    const subFS = Math.min(Math.round(H*0.036), 30);
-    ctx.font=`bold ${subFS}px 'Press Start 2P', monospace`;
-    ctx.strokeStyle='rgba(0,0,0,0.9)'; ctx.lineWidth=subFS*0.12;
-    ctx.strokeText('R3TARD', cx, panelY+panelH*0.41);
-    ctx.fillStyle='#FFD700'; ctx.fillText('R3TARD', cx, panelY+panelH*0.41);
+    const subFS = Math.min(Math.round(H * 0.036), 30);
+    ctx.font = `bold ${subFS}px 'Press Start 2P', monospace`;
+    ctx.strokeStyle = 'rgba(0,0,0,0.9)'; ctx.lineWidth = subFS * 0.12;
+    ctx.strokeText('R3TARD', cx, panelY + panelH * 0.35);
+    ctx.fillStyle = '#FFD700'; ctx.fillText('R3TARD', cx, panelY + panelH * 0.35);
 
     // divider
-    const dg = ctx.createLinearGradient(panelX+panelW*0.08,0,panelX+panelW*0.92,0);
-    dg.addColorStop(0,'rgba(255,255,255,0)'); dg.addColorStop(0.5,'rgba(255,255,255,0.2)'); dg.addColorStop(1,'rgba(255,255,255,0)');
-    ctx.fillStyle=dg; ctx.fillRect(panelX+panelW*0.08, panelY+panelH*0.5, panelW*0.84, 1);
+    const dg = ctx.createLinearGradient(panelX + panelW * 0.08, 0, panelX + panelW * 0.92, 0);
+    dg.addColorStop(0, 'rgba(255,255,255,0)'); dg.addColorStop(0.5, 'rgba(255,255,255,0.2)'); dg.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = dg; ctx.fillRect(panelX + panelW * 0.08, panelY + panelH * 0.44, panelW * 0.84, 1);
 
-    // stats — two columns
-    const statFS = Math.min(Math.round(H*0.028), 23);
-    const col1x  = panelX+panelW*0.28, col2x = panelX+panelW*0.65;
-    const row1y  = panelY+panelH*0.6,  row2y = panelY+panelH*0.72;
+    // stats — two columns, well above buttons
+    const statFS = Math.min(Math.round(H * 0.028), 23);
+    const col1x  = panelX + panelW * 0.28;
+    const col2x  = panelX + panelW * 0.65;
+    const row1y  = panelY + panelH * 0.53;
+    const row2y  = panelY + panelH * 0.63;
 
-    ctx.font=`${statFS}px Arial`; ctx.fillStyle='rgba(255,255,255,0.6)';
-    ctx.textAlign='left';
+    ctx.font = `${statFS}px Arial`; ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.textAlign = 'left';
     ctx.fillText('Score', col1x, row1y);
     ctx.fillText('Best',  col1x, row2y);
 
-    ctx.font=`bold ${Math.round(statFS*1.25)}px Arial`;
-    ctx.textAlign='right';
-    ctx.fillStyle='white';  ctx.fillText(score, col2x, row1y);
-    ctx.fillStyle='#FFD700'; ctx.fillText(best,  col2x, row2y);
+    ctx.font = `bold ${Math.round(statFS * 1.25)}px Arial`;
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'white';   ctx.fillText(score, col2x, row1y);
+    ctx.fillStyle = '#FFD700'; ctx.fillText(
+        score > 0 && score >= best ? `${best} 🏆` : best,
+        col2x, row2y
+    );
 
-    if (score>0 && score>=best) {
-        ctx.font=`bold ${Math.round(statFS*0.82)}px Arial`;
-        ctx.fillStyle='#2ecc71'; ctx.textAlign='center';
-        ctx.fillText('🏆  NEW RECORD!', cx, panelY+panelH*0.81);
-    }
+    // buttons (side-by-side) — appear after short delay
+    const btnA = easeOut(Math.max(deadTimer - 26, 0), 16);
+    ctx.globalAlpha = Math.min(btnA, 1);
 
-    // buttons — both proper, appear with delay
-    const btnA = easeOut(Math.max(deadTimer-26,0), 16);
-    ctx.globalAlpha = Math.min(btnA,1);
+    const bh    = Math.round(panelH * 0.125);
+    const bpad  = panelW * 0.05;
+    const bgap  = Math.round(panelW * 0.04);
+    const btot  = panelW - bpad * 2;
+    const bwEa  = (btot - bgap) / 2;
+    const bxL   = panelX + bpad;
+    const bxR   = bxL + bwEa + bgap;
+    const bby   = panelY + panelH * 0.76;
 
-    const bh   = Math.round(panelH*0.135);
-    const bpad = panelW*0.07;
-    const bw1  = panelW*0.86;
-    const bx1  = panelX+bpad;
-    const by1  = panelY+panelH - bh*2 - Math.round(panelH*0.07) - Math.round(panelH*0.025);
-    const by2  = by1+bh+Math.round(panelH*0.025);
+    // Play Again (green, left)
+    menuBtn(bxL, bby, bwEa, bh, 12, '#1e8449', '#2ecc71',
+        mouseX > bxL && mouseX < bxL + bwEa && mouseY > bby && mouseY < bby + bh);
+    ctx.font = `bold ${Math.min(Math.round(H * 0.024), 20)}px Arial`;
+    ctx.fillStyle = 'white'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 4;
+    ctx.fillText('▶ Play Again', bxL + bwEa / 2, bby + bh / 2);
+    ctx.shadowBlur = 0;
+    UI.restart = { x: bxL, y: bby, w: bwEa, h: bh };
 
-    // Play Again (green)
-    menuBtn(bx1, by1, bw1, bh, 12, '#1e8449', '#2ecc71', mouseX>bx1&&mouseX<bx1+bw1&&mouseY>by1&&mouseY<by1+bh);
-    ctx.font=`bold ${Math.min(Math.round(H*0.028),24)}px Arial`;
-    ctx.fillStyle='white'; ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.shadowColor='rgba(0,0,0,0.4)'; ctx.shadowBlur=4;
-    ctx.fillText('▶  Play Again', cx, by1+bh/2);
-    ctx.shadowBlur=0;
-    UI.restart = {x:bx1,y:by1,w:bw1,h:bh};
+    // Change Character (purple, right)
+    menuBtn(bxR, bby, bwEa, bh, 12, '#5b2c8d', '#9b59b6',
+        mouseX > bxR && mouseX < bxR + bwEa && mouseY > bby && mouseY < bby + bh);
+    ctx.font = `bold ${Math.min(Math.round(H * 0.022), 18)}px Arial`;
+    ctx.fillStyle = 'white';
+    ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 4;
+    ctx.fillText('🎨 Change', bxR + bwEa / 2, bby + bh * 0.38);
+    ctx.fillText('Character', bxR + bwEa / 2, bby + bh * 0.72);
+    ctx.shadowBlur = 0;
+    UI.customize = { x: bxR, y: bby, w: bwEa, h: bh };
 
-    // Change Character (purple, same size)
-    menuBtn(bx1, by2, bw1, bh, 12, '#5b2c8d', '#9b59b6', mouseX>bx1&&mouseX<bx1+bw1&&mouseY>by2&&mouseY<by2+bh);
-    ctx.font=`bold ${Math.min(Math.round(H*0.026),22)}px Arial`;
-    ctx.fillStyle='white';
-    ctx.shadowColor='rgba(0,0,0,0.4)'; ctx.shadowBlur=4;
-    ctx.fillText('🎨  Change Character', cx, by2+bh/2);
-    ctx.shadowBlur=0;
-    UI.customize = {x:bx1,y:by2,w:bw1,h:bh};
-
-    ctx.globalAlpha=1;
+    ctx.globalAlpha = 1;
 }
 
 // ─── HIT TEST ────────────────────────────────────────────────────
@@ -852,7 +871,7 @@ function handleInput(e) {
     if (state === 'MENU') {
         if (hits('menuPlay',      x, y)) { startGame();           return; }
         if (hits('menuCustomize', x, y)) { state = 'CUSTOMIZER';  return; }
-        mBirdFlapTimer = 12; // visual flap bounce
+        demo.bird.vy = FLAP_V; // fun: let player flap the background bird
         return;
     }
 
@@ -883,7 +902,7 @@ function handleInput(e) {
 function handleKey(e) {
     if (e.code === 'Space' || e.code === 'ArrowUp') {
         e.preventDefault();
-        if (state === 'MENU')        { mBird.vy = FLAP_V; return; }
+        if (state === 'MENU')        { demo.bird.vy = FLAP_V; return; }
         if (state === 'PLAYING')     { bird.flap(); return; }
         if (state === 'DEAD')        { startGame(); return; }
         if (state === 'CUSTOMIZER' && e.code === 'Space') startGame();
