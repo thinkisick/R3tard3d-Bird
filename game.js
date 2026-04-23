@@ -264,20 +264,28 @@ async function lbSubmit(nick, sc) {
             headers: {'Content-Type':'application/json'},
             body: JSON.stringify({ nickname: nick, score: sc, ts: Date.now() })
         });
-        lbFetch();
     } catch(e) {}
 }
 
 async function lbFetch() {
-    const local = JSON.parse(localStorage.getItem('r3b_lb') || '{}');
-    lbData = Object.values(local).sort((a,b)=>b.score-a.score).slice(0,10);
-    if (!FIREBASE_URL) return;
+    if (!FIREBASE_URL) {
+        const local = JSON.parse(localStorage.getItem('r3b_lb') || '{}');
+        lbData = Object.values(local).sort((a,b) => b.score - a.score).slice(0, 10);
+        return;
+    }
     try {
-        const r = await fetch(`${FIREBASE_URL}/lb.json?orderBy="score"&limitToLast=10`);
+        const r = await fetch(`${FIREBASE_URL}/lb.json`);
         const d = await r.json();
-        if (d && typeof d === 'object')
-            lbData = Object.values(d).sort((a,b)=>b.score-a.score).slice(0,10);
-    } catch(e) {}
+        if (d && typeof d === 'object' && !d.error) {
+            Object.keys(_lbCache).forEach(k => delete _lbCache[k]);
+            Object.assign(_lbCache, d);
+            _lbUpdateFromCache();
+        }
+    } catch(e) {
+        const local = JSON.parse(localStorage.getItem('r3b_lb') || '{}');
+        if (Object.keys(_lbCache).length === 0)
+            lbData = Object.values(local).sort((a,b) => b.score - a.score).slice(0, 10);
+    }
 }
 
 // ─── LIVE LEADERBOARD (Firebase SSE) ────────────────────────────
