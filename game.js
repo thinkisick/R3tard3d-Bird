@@ -75,7 +75,7 @@ const MUSIC_TRACKS = [
     'Music/Milky_-_Just_The_Way_You_Are_Radio_Edit_(SkySound.cc).mp3',
 ];
 let _bgAudio    = null;
-let _musicReady = false;
+let _musicReady = false;  // true only when audio is actually playing
 
 function _shuffled(arr) {
     const a = [...arr];
@@ -88,18 +88,22 @@ function _shuffled(arr) {
 
 let _playlist = [];
 function _playTrack(idx) {
-    if (!_playlist.length) return;
     if (_bgAudio) { _bgAudio.pause(); _bgAudio = null; }
+    if (!_playlist.length) return;
     _bgAudio = new Audio(_playlist[idx % _playlist.length]);
-    _bgAudio.volume = 0.22;
+    _bgAudio.volume = 0.18;
     _bgAudio.onended = () => _playTrack(idx + 1);
-    _bgAudio.play().catch(() => {});
+    _bgAudio.play().catch(() => {
+        // Autoplay was blocked — reset so the next user gesture retries
+        _bgAudio    = null;
+        _musicReady = false;
+    });
 }
 
 function startMusicOnce() {
     if (_musicReady || !MUSIC_TRACKS.length) return;
-    _musicReady = true;
-    _playlist = _shuffled(MUSIC_TRACKS);
+    _musicReady = true;  // set optimistically; reset on play() failure
+    if (!_playlist.length) _playlist = _shuffled(MUSIC_TRACKS);
     _playTrack(0);
 }
 
@@ -222,13 +226,14 @@ const demo = {
 };
 
 // ─── LEADERBOARD ─────────────────────────────────────────────────
-// Fill in your Firebase Realtime Database URL to enable global leaderboard.
-// Steps: console.firebase.google.com → create project → Realtime Database
-// → start in test mode → copy the URL (ends with .firebaseio.com)
-const FIREBASE_URL = '';   // e.g. 'https://my-game-abc123-default-rtdb.firebaseio.com'
+// Global leaderboard uses Firebase Realtime Database (free tier).
+// To activate: console.firebase.google.com → New project → Realtime Database
+// → Start in TEST mode → copy the URL below (ends with .firebaseio.com)
+// Without it, scores are still saved locally per-browser.
+const FIREBASE_URL = 'https://r3tard3d-bird-default-rtdb.firebaseio.com';
 
-let lbData      = [];      // [{nickname, score}, ...] top 10
-let nicknameInput = '';    // current text being typed
+let lbData        = [];   // [{nickname, score}, ...] top 10
+let nicknameInput = '';   // text being typed in nickname entry
 
 function lbSavedNick() { return localStorage.getItem('r3b_nick') || ''; }
 
@@ -246,6 +251,10 @@ async function lbSubmit(nick, sc) {
     lbAddLocal(nick, sc);
     if (!FIREBASE_URL) return;
     try {
+        // Keep only best score per nickname
+        const existing = await fetch(`${FIREBASE_URL}/lb/${encodeURIComponent(nick)}.json`);
+        const cur = await existing.json();
+        if (cur && typeof cur.score === 'number' && cur.score >= sc) return; // not a new best
         await fetch(`${FIREBASE_URL}/lb/${encodeURIComponent(nick)}.json`, {
             method: 'PUT',
             headers: {'Content-Type':'application/json'},
@@ -256,7 +265,6 @@ async function lbSubmit(nick, sc) {
 }
 
 async function lbFetch() {
-    // always refresh local
     const local = JSON.parse(localStorage.getItem('r3b_lb') || '{}');
     lbData = Object.values(local).sort((a,b)=>b.score-a.score).slice(0,10);
     if (!FIREBASE_URL) return;
@@ -266,6 +274,67 @@ async function lbFetch() {
         if (d && typeof d === 'object')
             lbData = Object.values(d).sort((a,b)=>b.score-a.score).slice(0,10);
     } catch(e) {}
+}
+
+// ─── NICKNAME HTML INPUT OVERLAY ─────────────────────────────────
+// A transparent <input> with pointer-events:none that is focused
+// programmatically so mobile keyboards appear when the user taps.
+let _nickEl = null;
+
+function _ensureNickEl() {
+    if (_nickEl) return;
+    _nickEl = document.createElement('input');
+    _nickEl.type        = 'text';
+    _nickEl.maxLength   = 20;
+    _nickEl.autocomplete = 'off';
+    _nickEl.autocorrect  = 'off';
+    _nickEl.autocapitalize = 'characters';
+    _nickEl.spellcheck   = false;
+    Object.assign(_nickEl.style, {
+        position      : 'fixed',
+        top           : '0', left: '0',
+        width         : '1px', height: '1px',
+        opacity       : '0',
+        pointerEvents : 'none',   // never blocks canvas clicks
+        border        : 'none',
+        outline       : 'none',
+        fontSize      : '16px',   // prevent iOS auto-zoom
+        zIndex        : '100',
+    });
+    _nickEl.addEventListener('input', () => { nicknameInput = _nickEl.value; });
+    _nickEl.addEventListener('keydown', e => {
+        e.stopPropagation(); // prevent double-firing with handleKey
+        if (e.key === 'Enter')     { e.preventDefault(); _nickCommit(); }
+        if (e.key === 'Escape')    { e.preventDefault(); _nickSkipFn(); }
+        if (e.key === 'Backspace') { /* handled by browser, input event fires */ }
+    });
+    document.body.appendChild(_nickEl);
+}
+
+function _nickShow() {
+    _ensureNickEl();
+    _nickEl.value = nicknameInput || '';
+    _nickEl.style.display = 'block';
+    // requestAnimationFrame ensures focus fires within the current user-gesture
+    requestAnimationFrame(() => { _nickEl.focus(); _nickEl.select(); });
+}
+
+function _nickHide() {
+    if (!_nickEl) return;
+    _nickEl.style.display = 'none';
+    _nickEl.blur();
+}
+
+function _nickCommit() {
+    const nick = (nicknameInput || '').trim().slice(0, 20);
+    if (nick) lbSubmit(nick, score);
+    _nickHide();
+    state = 'DEAD'; deadTimer = 0;
+}
+
+function _nickSkipFn() {
+    _nickHide();
+    state = 'DEAD'; deadTimer = 0;
 }
 
 // ─── SCREEN CRACKS ───────────────────────────────────────────────
@@ -901,6 +970,7 @@ function drawDying() {
         if (!lbSavedNick() && score > 0) {
             nicknameInput = '';
             state = 'NICKNAME';
+            _nickShow();
         } else {
             state = 'DEAD';
         }
@@ -1207,38 +1277,27 @@ function handleInput(e) {
     }
 
     if (state === 'NICKNAME') {
-        if (hits('nickSkip', x, y)) { state = 'DEAD'; return; }
-        if (hits('nickSave', x, y)) {
-            const nick = nicknameInput.trim().slice(0, 20);
-            if (nick) { lbSubmit(nick, score); }
-            state = 'DEAD';
-            return;
-        }
+        if (hits('nickSkip', x, y)) { _nickSkipFn();  return; }
+        if (hits('nickSave', x, y)) { _nickCommit();  return; }
+        // Tap anywhere else → focus the hidden input (shows mobile keyboard)
+        _nickEl && _nickEl.focus();
+        return;
     }
 }
 
 function handleKey(e) {
+    // NICKNAME keyboard is handled by _nickEl's own keydown listener.
+    // This block is a desktop fallback when the hidden input isn't focused.
     if (state === 'NICKNAME') {
-        if (e.key === 'Backspace') {
-            e.preventDefault();
-            nicknameInput = nicknameInput.slice(0, -1);
-            return;
-        }
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            const nick = nicknameInput.trim().slice(0, 20);
-            if (nick) lbSubmit(nick, score);
-            state = 'DEAD';
-            return;
-        }
-        if (e.key === 'Escape') { state = 'DEAD'; return; }
+        if (e.key === 'Enter')     { e.preventDefault(); _nickCommit();  return; }
+        if (e.key === 'Escape')    { e.preventDefault(); _nickSkipFn();  return; }
+        if (e.key === 'Backspace') { e.preventDefault(); nicknameInput = nicknameInput.slice(0,-1); return; }
+        if (e.key.length === 1 && nicknameInput.length < 20) { nicknameInput += e.key; }
+        return;
     }
 
     if (state === 'LEADERBOARD') {
         if (e.key === 'Escape') { state = 'MENU'; return; }
-        if (e.key.length === 1 && nicknameInput.length < 20) {
-            nicknameInput += e.key;
-        }
         return;
     }
 
