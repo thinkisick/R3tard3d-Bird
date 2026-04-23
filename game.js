@@ -91,16 +91,69 @@ window.addEventListener('resize', () => {
 });
 
 // ─── GAME STATE ──────────────────────────────────────────────────
-// 'MENU' | 'CUSTOMIZER' | 'PLAYING' | 'DEAD'
+// 'MENU' | 'CUSTOMIZER' | 'PLAYING' | 'DYING' | 'DEAD'
 let state      = 'MENU';
 let menuTimer  = 0;
 let deadTimer  = 0;
+let dyingTimer = 0;
 
 const sel = { backgrounds: 4, eyes: 5, mouth: 6 };
 let score      = 0;
 let best       = +localStorage.getItem('r3b_best') || 0;
 let frameCount = 0;
 const PIPE_INT = 95;
+
+// ─── WORLD TIERS ─────────────────────────────────────────────────
+const TIERS = [
+    { min:0,  label:'',            tint: null,                   pc:'#4CAF50', pd:'#388E3C' },
+    { min:10, label:'SUNSET 🌅',   tint:'rgba(255,80,0,0.15)',   pc:'#FF7043', pd:'#E64A19' },
+    { min:25, label:'NIGHT 🌙',    tint:'rgba(0,0,40,0.38)',     pc:'#1565C0', pd:'#0D47A1' },
+    { min:50, label:'🔥 HELL MODE',tint:'rgba(120,0,0,0.42)',    pc:'#B71C1C', pd:'#7F0000' },
+];
+let currentTier = 0;
+let tierNotif   = { text:'', timer:0 };
+
+// ─── SCORE POP ───────────────────────────────────────────────────
+let scoreAnim = 0;
+let prevScore = 0;
+let plusOneY  = 0;
+let plusOneT  = 0;
+
+// ─── MENU BIRD (portal mechanic) ─────────────────────────────────
+const mBird = { x:0, y:0, vy:0 };
+function initMenuBird() {
+    mBird.x  = canvas.width * 0.12;
+    mBird.y  = canvas.height * 0.5;
+    mBird.vy = 0;
+}
+
+// ─── SCREEN CRACKS ───────────────────────────────────────────────
+const cracks = [];
+function generateCracks(ox, oy) {
+    cracks.length = 0;
+    for (let i = 0; i < 11; i++) {
+        const angle = (i/11)*Math.PI*2 + (Math.random()-0.5)*0.7;
+        const len   = Math.min(canvas.width,canvas.height)*(0.22+Math.random()*0.32);
+        const segs  = 3 + Math.floor(Math.random()*3);
+        const pts   = [{x:ox,y:oy}];
+        let cx=ox, cy=oy, a=angle;
+        for (let s=0;s<segs;s++) {
+            a += (Math.random()-0.5)*0.45;
+            const d = (len/segs)*(0.6+Math.random()*0.8);
+            cx += Math.cos(a)*d; cy += Math.sin(a)*d;
+            pts.push({x:cx,y:cy});
+        }
+        cracks.push(pts);
+    }
+}
+
+// ─── MOUSE TRACKING ──────────────────────────────────────────────
+let mouseX = -999, mouseY = -999;
+canvas.addEventListener('mousemove', e => {
+    const r = canvas.getBoundingClientRect();
+    mouseX = (e.clientX-r.left)*canvas.width/r.width;
+    mouseY = (e.clientY-r.top)*canvas.height/r.height;
+});
 
 // ─── EASING ──────────────────────────────────────────────────────
 function easeOut(t, d) { const x = Math.min(t/d, 1); return 1-(1-x)*(1-x); }
@@ -183,7 +236,17 @@ function updatePipes() {
     for (let i = pipes.length - 1; i >= 0; i--) {
         pipes[i].x -= PIPESPD;
         if (!pipes[i].scored && pipes[i].x + PIPEW < bird.x - BIRDHR) {
-            pipes[i].scored = true; score++;
+            pipes[i].scored = true;
+            score++;
+            scoreAnim = 18;
+            plusOneY  = canvas.height * 0.14;
+            plusOneT  = 20;
+            // check tier change
+            const newTierIdx = TIERS.reduce((acc,t,i)=> score>=t.min?i:acc, 0);
+            if (newTierIdx !== currentTier) {
+                currentTier = newTierIdx;
+                tierNotif = { text: TIERS[currentTier].label, timer: 90 };
+            }
         }
         if (pipes[i].x + PIPEW < -5) pipes.splice(i, 1);
     }
@@ -257,79 +320,113 @@ function drawPixelTitle(cx, cy, size, wave) {
     });
 }
 
-// ─── DRAW: MENU ──────────────────────────────────────────────────
+// ─── DRAW: MENU (portal level) ───────────────────────────────────
+const PORTALS = [
+    { yFrac:0.32, label:'▶  PLAY',      color:'#27ae60', glow:'#2ecc71', action:()=>startGame() },
+    { yFrac:0.68, label:'🎨  CUSTOMIZE', color:'#8e44ad', glow:'#9b59b6', action:()=>{ state='CUSTOMIZER'; } },
+];
+
+function updateMenuBird() {
+    mBird.vy = Math.min(mBird.vy + GRAVITY_V, canvas.height*0.022);
+    mBird.y += mBird.vy;
+    mBird.x += Math.min(canvas.width*0.004, 4);
+
+    const pX = canvas.width * 0.72;
+    const pR = canvas.height * 0.09;
+
+    // portal collision
+    if (mBird.x > pX - BIRDR && mBird.x < pX + BIRDR*2) {
+        for (const p of PORTALS) {
+            if (Math.abs(mBird.y - p.yFrac*canvas.height) < pR*0.85) {
+                p.action(); return;
+            }
+        }
+    }
+    // reset if out of bounds
+    if (mBird.y > canvas.height - GH - BIRDR || mBird.y < BIRDR || mBird.x > canvas.width*0.88) {
+        initMenuBird();
+    }
+}
+
 function drawMenu() {
     const W = canvas.width, H = canvas.height, cx = W/2;
     menuTimer++;
+    updateMenuBird();
 
-    // starfield background
-    ctx.fillStyle = '#050510';
+    // background (use selected NFT bg)
+    drawBackground();
+    // dark overlay so UI is readable
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.fillRect(0, 0, W, H);
+    drawGround();
 
-    // animated stars
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    const stars = [
-        [0.06,0.08],[0.17,0.05],[0.31,0.11],[0.45,0.04],[0.58,0.09],
-        [0.72,0.06],[0.88,0.12],[0.13,0.18],[0.27,0.22],[0.51,0.15],
-        [0.66,0.2],[0.79,0.17],[0.92,0.07],[0.04,0.28],[0.38,0.25],
-        [0.84,0.3],[0.22,0.35],[0.60,0.32],[0.75,0.38],[0.95,0.24]
-    ];
-    stars.forEach(([fx,fy], i) => {
-        const r = 0.8 + Math.abs(Math.sin(frameCount * 0.04 + i)) * 1.2;
-        ctx.beginPath();
-        ctx.arc(fx*W, fy*H*0.7, r, 0, Math.PI*2);
-        ctx.fill();
+    // pixel title wave
+    const titleSize = Math.min(Math.round(W*0.042), 36);
+    drawPixelTitle(cx, H*0.13, titleSize, true);
+
+    // portals
+    const pX = W*0.72;
+    const pR = H*0.09;
+    PORTALS.forEach((p, i) => {
+        const py  = p.yFrac * H;
+        const near = Math.hypot(mBird.x-pX, mBird.y-py) < pR*2;
+        const pulse = 1 + 0.06*Math.sin(frameCount*0.1 + i*Math.PI);
+
+        // glow
+        const gr = ctx.createRadialGradient(pX,py,0,pX,py,pR*2.5);
+        gr.addColorStop(0, p.color+'66');
+        gr.addColorStop(1, 'transparent');
+        ctx.fillStyle = gr;
+        ctx.beginPath(); ctx.arc(pX,py,pR*2.5,0,Math.PI*2); ctx.fill();
+
+        // rotating ring
+        ctx.save(); ctx.translate(pX,py); ctx.rotate(frameCount*0.02*(i?-1:1));
+        for (let d=0;d<8;d++) {
+            const a = (d/8)*Math.PI*2;
+            ctx.beginPath();
+            ctx.arc(Math.cos(a)*pR*1.25, Math.sin(a)*pR*1.25, 4, 0, Math.PI*2);
+            ctx.fillStyle = p.glow;
+            ctx.fill();
+        }
+        ctx.restore();
+
+        // main circle
+        ctx.save(); ctx.translate(pX,py); ctx.scale(pulse,pulse);
+        ctx.beginPath(); ctx.arc(0,0,pR,0,Math.PI*2);
+        ctx.fillStyle = p.color+'44'; ctx.fill();
+        ctx.strokeStyle = near ? p.glow : p.color;
+        ctx.lineWidth = near ? 4 : 2.5; ctx.stroke();
+
+        // label
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.font=`bold ${Math.round(H*0.025)}px Arial`;
+        ctx.fillStyle='white';
+        ctx.shadowColor=p.glow; ctx.shadowBlur=8;
+        ctx.fillText(p.label, 0, 0);
+        ctx.shadowBlur=0;
+        ctx.restore();
     });
 
-    // pixel title (wave animation)
-    const titleSize = Math.min(Math.round(W * 0.044), 38);
-    drawPixelTitle(cx, H * 0.26, titleSize, true);
+    // flying menuBird
+    const mRot = Math.max(-25, Math.min(90, mBird.vy/GRAVITY_V*3.3));
+    bird.draw(mBird.x, mBird.y, mRot, false, null);
 
-    // character floating preview
-    const floatY = H * 0.52 + Math.sin(frameCount * 0.05) * H * 0.012;
-    const previewR = Math.min(Math.round(H * 0.1), 80);
-    bird.draw(cx, floatY, 0, true, previewR);
+    // hint text pulsing
+    const pulse2 = 0.6 + 0.4*Math.abs(Math.sin(frameCount*0.06));
+    ctx.globalAlpha = pulse2;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.font=`bold ${Math.round(H*0.022)}px Arial`;
+    ctx.fillStyle='white';
+    ctx.fillText('TAP / CLICK to flap  ·  Fly through a portal', cx, H*0.88);
+    ctx.globalAlpha=1;
 
-    // tap to play — pulsing
-    const pulse = 0.75 + 0.25 * Math.abs(Math.sin(frameCount * 0.055));
-    const tfs   = Math.round(H * 0.025);
-    ctx.globalAlpha = pulse;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = `bold ${tfs}px Arial`;
-    ctx.fillStyle = 'white';
-    ctx.fillText('TAP  /  CLICK  /  SPACE  TO  PLAY', cx, H * 0.7);
-    ctx.globalAlpha = 1;
-
-    // buttons
-    const btnW = Math.min(Math.round(W * 0.55), 300);
-    const btnH = Math.round(H * 0.072);
-    const btnX = cx - btnW/2;
-
-    // PLAY button
-    const btnY1 = H * 0.77;
-    rr(btnX, btnY1, btnW, btnH, 14, '#27ae60', null);
-    ctx.font = `bold ${Math.round(H * 0.028)}px Arial`;
-    ctx.fillStyle = 'white';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('▶  PLAY', cx, btnY1 + btnH/2);
-    UI.menuPlay = { x: btnX, y: btnY1, w: btnW, h: btnH };
-
-    // CUSTOMIZE button
-    const btnY2 = btnY1 + btnH + Math.round(H * 0.018);
-    rr(btnX, btnY2, btnW, btnH, 14, '#181828', 'rgba(255,255,255,0.18)', 1.5);
-    ctx.font = `bold ${Math.round(H * 0.024)}px Arial`;
-    ctx.fillStyle = '#ccc';
-    ctx.fillText('🎨  CUSTOMIZE CHARACTER', cx, btnY2 + btnH/2);
-    UI.menuCustomize = { x: btnX, y: btnY2, w: btnW, h: btnH };
-
-    // best score badge
     if (best > 0) {
-        ctx.font = `${Math.round(H * 0.018)}px Arial`;
-        ctx.fillStyle = '#FFD700';
-        ctx.fillText(`🏆  Best: ${best}`, cx, btnY2 + btnH + Math.round(H * 0.04));
+        ctx.font=`${Math.round(H*0.018)}px Arial`;
+        ctx.fillStyle='#FFD700';
+        ctx.fillText(`🏆  Best: ${best}`, cx, H*0.93);
     }
+    UI.menuPlay      = { x:0,y:0,w:0,h:0 };
+    UI.menuCustomize = { x:0,y:0,w:0,h:0 };
 }
 
 // ─── DRAW: GAME ELEMENTS ─────────────────────────────────────────
@@ -343,20 +440,44 @@ function drawBackground() {
         ctx.fillStyle = g;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
+    // world tier tint overlay
+    const t = getTier();
+    if (t.tint) {
+        ctx.fillStyle = t.tint;
+        ctx.fillRect(0, 0, canvas.width, canvas.height - GH);
+    }
+    // tier notification
+    if (tierNotif.timer > 0) {
+        tierNotif.timer--;
+        const a = tierNotif.timer > 70 ? (90-tierNotif.timer)/20 : tierNotif.timer/70;
+        ctx.globalAlpha = Math.min(a,1);
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.font=`bold ${Math.round(canvas.height*0.042)}px Arial`;
+        ctx.fillStyle='white';
+        ctx.shadowColor='rgba(0,0,0,0.8)'; ctx.shadowBlur=12;
+        ctx.fillText(tierNotif.text, canvas.width/2, canvas.height*0.22);
+        ctx.shadowBlur=0; ctx.globalAlpha=1;
+    }
+}
+
+function getTier() {
+    for (let i=TIERS.length-1;i>=0;i--) if (score>=TIERS[i].min) return TIERS[i];
+    return TIERS[0];
 }
 
 function drawPipes() {
+    const t = getTier();
     for (const p of pipes) {
-        ctx.fillStyle = '#4CAF50';
+        ctx.fillStyle = t.pc;
         ctx.fillRect(p.x, 0, PIPEW, p.topH - 22);
-        ctx.fillStyle = '#388E3C';
+        ctx.fillStyle = t.pd;
         ctx.fillRect(p.x - 7, p.topH - 22, PIPEW + 14, 22);
         ctx.fillStyle = 'rgba(255,255,255,0.1)';
         ctx.fillRect(p.x + 6, 0, 12, p.topH - 22);
 
-        ctx.fillStyle = '#4CAF50';
+        ctx.fillStyle = t.pc;
         ctx.fillRect(p.x, p.botY + 22, PIPEW, canvas.height);
-        ctx.fillStyle = '#388E3C';
+        ctx.fillStyle = t.pd;
         ctx.fillRect(p.x - 7, p.botY, PIPEW + 14, 22);
         ctx.fillStyle = 'rgba(255,255,255,0.1)';
         ctx.fillRect(p.x + 6, p.botY + 22, 12, canvas.height);
@@ -377,7 +498,10 @@ function drawGround() {
 }
 
 function drawScore() {
-    const fs = Math.round(canvas.height * 0.084);
+    const base = Math.round(canvas.height * 0.084);
+    const scale = scoreAnim > 0 ? 1 + 0.4*(scoreAnim/18) : 1;
+    if (scoreAnim > 0) scoreAnim--;
+    const fs = Math.round(base * scale);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
     ctx.font = `bold ${fs}px Arial`;
@@ -386,6 +510,15 @@ function drawScore() {
     ctx.shadowBlur = 7;
     ctx.fillText(score, canvas.width/2, canvas.height*0.14);
     ctx.shadowBlur = 0;
+    // floating +1
+    if (plusOneT > 0) {
+        plusOneT--;
+        ctx.globalAlpha = plusOneT/20;
+        ctx.font=`bold ${Math.round(base*0.55)}px Arial`;
+        ctx.fillStyle='#FFD700';
+        ctx.fillText('+1', canvas.width/2 + base*0.8, plusOneY - (20-plusOneT)*1.4);
+        ctx.globalAlpha=1;
+    }
 }
 
 // ─── DRAW: CUSTOMIZER ────────────────────────────────────────────
@@ -486,6 +619,59 @@ function drawCustomizer() {
     if (best > 0) {
         ctx.font=`${Math.round(H*0.018)}px Arial`; ctx.fillStyle='#FFD700';
         ctx.fillText(`🏆  Best: ${best}`, W/2, btnY+btnH+Math.round(H*0.04));
+    }
+}
+
+// ─── DRAW: DYING ─────────────────────────────────────────────────
+function drawDying() {
+    dyingTimer++;
+    // bird continues to fall visually
+    bird.vy = Math.min(bird.vy + GRAVITY_V*0.6, canvas.height*0.015);
+    bird.y += bird.vy;
+    drawBackground();
+    drawPipes();
+    drawGround();
+    bird.draw(null, null, Math.min(bird.rot+3,90), false, null);
+
+    // phase 1 (0-22): CSS glitch on canvas element
+    if (dyingTimer <= 22) {
+        const sx = (Math.random()-0.5)*10;
+        const sy = (Math.random()-0.5)*5;
+        canvas.style.transform = `translate(${sx}px,${sy}px)`;
+        canvas.style.filter = `saturate(4) hue-rotate(${Math.floor(Math.random()*3)*120}deg) contrast(1.6)`;
+        // scanlines
+        ctx.fillStyle='rgba(0,0,0,0.18)';
+        for (let y=0;y<canvas.height;y+=3) ctx.fillRect(0,y,canvas.width,1.5);
+    } else {
+        canvas.style.transform='';
+        canvas.style.filter='';
+    }
+
+    // phase 2 (18-50): crack lines
+    if (dyingTimer > 18) {
+        const prog = Math.min((dyingTimer-18)/28, 1);
+        cracks.forEach((pts, ci) => {
+            if (ci/cracks.length > prog) return;
+            const visLen = Math.floor((pts.length-1)*Math.min((dyingTimer-18-ci*1.5)/12,1));
+            if (visLen < 1) return;
+            ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+            for (let p=1;p<=visLen;p++) ctx.lineTo(pts[p].x, pts[p].y);
+            ctx.strokeStyle='rgba(0,0,0,0.5)'; ctx.lineWidth=4; ctx.stroke();
+            ctx.strokeStyle='rgba(255,255,255,0.85)'; ctx.lineWidth=1.5; ctx.stroke();
+        });
+    }
+
+    // phase 3 (45-65): fade to black
+    if (dyingTimer > 45) {
+        ctx.fillStyle=`rgba(0,0,0,${Math.min((dyingTimer-45)/20,1)})`;
+        ctx.fillRect(0,0,canvas.width,canvas.height);
+    }
+
+    if (dyingTimer >= 65) {
+        canvas.style.transform='';
+        canvas.style.filter='';
+        state='DEAD';
+        deadTimer=0;
     }
 }
 
@@ -624,9 +810,7 @@ function handleInput(e) {
     const {x,y} = canvasXY(e);
 
     if (state === 'MENU') {
-        if (hits('menuPlay', x, y))      { startGame(); return; }
-        if (hits('menuCustomize', x, y)) { state = 'CUSTOMIZER'; return; }
-        startGame();
+        mBird.vy = FLAP_V;
         return;
     }
 
@@ -657,7 +841,7 @@ function handleInput(e) {
 function handleKey(e) {
     if (e.code === 'Space' || e.code === 'ArrowUp') {
         e.preventDefault();
-        if (state === 'MENU')        { startGame(); return; }
+        if (state === 'MENU')        { mBird.vy = FLAP_V; return; }
         if (state === 'PLAYING')     { bird.flap(); return; }
         if (state === 'DEAD')        { startGame(); return; }
         if (state === 'CUSTOMIZER' && e.code === 'Space') startGame();
@@ -670,17 +854,21 @@ document.addEventListener('keydown',  handleKey);
 
 // ─── GAME FLOW ───────────────────────────────────────────────────
 function startGame() {
-    state     = 'PLAYING';
-    score     = 0;
-    pipes     = [];
-    pipeTimer = PIPE_INT - 28;
+    state        = 'PLAYING';
+    score        = 0;
+    prevScore    = 0;
+    currentTier  = 0;
+    tierNotif    = { text:'', timer:0 };
+    pipes        = [];
+    pipeTimer    = PIPE_INT - 28;
     bird.reset();
     bird.flap();
 }
 
 function killBird() {
-    state     = 'DEAD';
-    deadTimer = 0;
+    state      = 'DYING';
+    dyingTimer = 0;
+    generateCracks(bird.x, bird.y);
     if (score > best) {
         best = score;
         localStorage.setItem('r3b_best', best);
@@ -701,6 +889,8 @@ function loop() {
         drawMenu();
     } else if (state === 'CUSTOMIZER') {
         drawCustomizer();
+    } else if (state === 'DYING') {
+        drawDying();
     } else {
         drawBackground();
         drawPipes();
@@ -714,5 +904,6 @@ function loop() {
 }
 
 // ─── BOOT ────────────────────────────────────────────────────────
+initMenuBird();
 preloadImages();
 loop();
