@@ -559,10 +559,10 @@ function drawMenu() {
 
     // ── centered buttons ──
     const bw   = Math.min(W * 0.52, 340);
-    const bh   = Math.min(Math.round(H * 0.13), 82);
+    const bh   = Math.min(Math.round(H * 0.1), 68);
     const bx   = W / 2 - bw / 2;
-    const gap  = Math.round(H * 0.032);
-    const by1  = H * 0.44, by2 = by1 + bh + gap;
+    const gap  = Math.round(H * 0.022);
+    const by1  = H * 0.38, by2 = by1 + bh + gap;
 
     const hovPlay = mouseX > bx && mouseX < bx + bw && mouseY > by1 && mouseY < by1 + bh;
     const hovCust = mouseX > bx && mouseX < bx + bw && mouseY > by2 && mouseY < by2 + bh;
@@ -584,43 +584,47 @@ function drawMenu() {
     ctx.shadowBlur = 0;
     UI.menuCustomize = { x: bx, y: by2, w: bw, h: bh };
 
-    // best score + leaderboard below buttons
-    const lbY0 = by2 + bh + Math.round(H * 0.045);
+    // best score
+    const lbY0 = by2 + bh + Math.round(H * 0.028);
     if (best > 0) {
-        ctx.font = `bold ${Math.round(H * 0.022)}px Arial`;
+        ctx.font = `bold ${Math.round(H * 0.02)}px Arial`;
         ctx.fillStyle = '#FFD700';
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(`🏆  Best: ${best}`, W / 2, lbY0);
     }
 
-    // leaderboard panel
-    if (lbData.length > 0) {
-        const show   = Math.min(lbData.length, 5);
-        const rowH2  = Math.round(H * 0.038);
-        const panW   = Math.min(W * 0.68, 400);
-        const panH   = rowH2 * (show + 1) + 14;
-        const panX   = W / 2 - panW / 2;
-        const panY   = lbY0 + Math.round(H * 0.038);
-        rr(panX, panY, panW, panH, 14, 'rgba(0,0,20,0.72)', 'rgba(120,80,220,0.55)', 1.5);
+    // leaderboard panel (always shown)
+    const show   = Math.min(lbData.length, 5);
+    const rowH2  = Math.round(H * 0.034);
+    const panW   = Math.min(W * 0.72, 400);
+    const panH   = rowH2 * Math.max(show, 1) + rowH2 + 12;
+    const panX   = W / 2 - panW / 2;
+    const panY   = lbY0 + Math.round(H * 0.028);
+    rr(panX, panY, panW, panH, 14, 'rgba(0,0,20,0.75)', 'rgba(120,80,220,0.6)', 1.5);
 
-        ctx.font = `bold ${Math.round(H * 0.019)}px Arial`;
-        ctx.fillStyle = 'rgba(200,160,255,0.9)';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText('LEADERBOARD', W / 2, panY + rowH2 * 0.6);
+    ctx.font = `bold ${Math.round(H * 0.018)}px Arial`;
+    ctx.fillStyle = 'rgba(210,170,255,0.95)';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('LEADERBOARD', W / 2, panY + rowH2 * 0.62);
 
+    if (show === 0) {
+        ctx.font = `${Math.round(H * 0.016)}px Arial`;
+        ctx.fillStyle = 'rgba(180,180,180,0.6)';
+        ctx.fillText('No scores yet — play to get on the board!', W / 2, panY + rowH2 * 1.5);
+    } else {
         const medals = ['🥇','🥈','🥉'];
         for (let i = 0; i < show; i++) {
-            const ey = panY + rowH2 * (i + 1) + 8;
+            const ey = panY + rowH2 * (i + 1) + 10;
             const entry = lbData[i];
             const medal = medals[i] || `${i+1}.`;
-            ctx.font = `bold ${Math.round(H * 0.018)}px Arial`;
+            ctx.font = `bold ${Math.round(H * 0.017)}px Arial`;
             ctx.textAlign = 'left'; ctx.fillStyle = i === 0 ? '#FFD700' : '#ddd';
-            ctx.fillText(`${medal} ${entry.nickname}`, panX + 18, ey + rowH2 / 2);
+            ctx.fillText(`${medal} ${entry.nickname}`, panX + 16, ey + rowH2 / 2);
             ctx.textAlign = 'right'; ctx.fillStyle = i === 0 ? '#FFD700' : '#bbb';
-            ctx.fillText(entry.score, panX + panW - 18, ey + rowH2 / 2);
+            ctx.fillText(entry.score, panX + panW - 16, ey + rowH2 / 2);
         }
-        ctx.textAlign = 'center';
     }
+    ctx.textAlign = 'center';
 }
 
 // ─── DRAW: GAME ELEMENTS ─────────────────────────────────────────
@@ -772,11 +776,9 @@ function drawCustomizer() {
     CATS.forEach((cat, i) => {
         const ry = selY0 + i*rowH;
 
-        // row bg with subtle left accent stripe per category
         const accent = ['#9b59b6','#3498db','#e74c3c'][i];
+        // row bg
         rr(pad, ry, W-pad*2, rowH-6, 10, '#0e0e1c', null);
-        ctx.fillStyle = accent;
-        ctx.beginPath(); ctx.roundRect(pad, ry, 4, rowH-6, [10,0,0,10]); ctx.fill();
 
         // small label top-left (inside row, outside arrow zone)
         const labelX = pad + AW + 18;
