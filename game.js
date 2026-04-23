@@ -438,6 +438,106 @@ function easeOutBack(t, d) {
     return 1 + c3*Math.pow(x-1,3) + c1*Math.pow(x-1,2);
 }
 
+// ─── COLOUR UTILITIES ────────────────────────────────────────────
+function _hexBrighter(hex, t) {
+    const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
+    return `rgb(${Math.min(255,r+255*t)|0},${Math.min(255,g+255*t)|0},${Math.min(255,b+255*t)|0})`;
+}
+function _hexDarker(hex, t) {
+    const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
+    return `rgb(${(r*(1-t))|0},${(g*(1-t))|0},${(b*(1-t))|0})`;
+}
+
+// ─── PRESS STATE (button push effect) ────────────────────────────
+let _pressX = -999, _pressY = -999;
+
+// ─── STAR FIELD ──────────────────────────────────────────────────
+const _stars = Array.from({length: 75}, () => ({
+    xf: Math.random(),
+    yf: 0.04 + Math.random() * 0.76,
+    r:  0.4 + Math.random() * 1.6,
+    a:  0.25 + Math.random() * 0.75,
+    t:  Math.random() * Math.PI * 2
+}));
+
+function _drawStars() {
+    const W = canvas.width, H = canvas.height - GH;
+    _stars.forEach(s => {
+        const a = s.a * (0.45 + Math.sin(frameCount * 0.038 + s.t) * 0.55);
+        ctx.beginPath();
+        ctx.arc(s.xf * W, s.yf * H, s.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,255,255,${a.toFixed(2)})`;
+        ctx.fill();
+    });
+}
+
+// ─── CITY PARALLAX ───────────────────────────────────────────────
+function _genSkyline(count, segW, minH, maxH, seed) {
+    const s = []; let r = seed;
+    for (let i = 0; i < count; i++) {
+        r = (r * 16807) % 2147483647;
+        const h = minH + (r / 2147483647) * (maxH - minH);
+        r = (r * 16807) % 2147483647;
+        const w = segW * (0.5 + (r / 2147483647) * 0.9);
+        s.push({ w, h });
+    }
+    return s;
+}
+const _cityFar  = _genSkyline(52, 58, 0.09, 0.30, 0x5A3E7B);
+const _cityNear = _genSkyline(40, 42, 0.05, 0.17, 0x2F9AC4);
+
+function _drawCityLayer(segs, colorFill, scrollSpd) {
+    const H = canvas.height, W = canvas.width, gY = H - GH;
+    const totalW = segs.reduce((s, b) => s + b.w, 0);
+    const off = (frameCount * scrollSpd) % totalW;
+    ctx.fillStyle = colorFill;
+    for (let copy = -1; copy <= Math.ceil(W / totalW) + 1; copy++) {
+        let dx = copy * totalW - off;
+        for (const b of segs) {
+            if (dx > W) break;
+            if (dx + b.w > 0) ctx.fillRect(dx, gY - b.h * H, b.w - 1, b.h * H);
+            dx += b.w;
+        }
+    }
+}
+
+// ─── PARTICLE SYSTEM ─────────────────────────────────────────────
+const _particles = [];
+
+function spawnParticles(x, y) {
+    const palette = ['#e74c3c','#FFD700','#9b59b6','#3498db','#2ecc71','#e67e22','#ff69b4','#fff'];
+    for (let i = 0; i < 26; i++) {
+        const angle = (i / 26) * Math.PI * 2 + (Math.random() - 0.5) * 0.7;
+        const spd   = 2.5 + Math.random() * 7.5;
+        _particles.push({
+            x, y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd - 2.5,
+            r:  2.5 + Math.random() * 4.5,
+            life: 1,
+            decay: 0.020 + Math.random() * 0.018,
+            color: palette[i % palette.length],
+            grav: 0.16 + Math.random() * 0.14
+        });
+    }
+}
+
+function updateDrawParticles() {
+    for (let i = _particles.length - 1; i >= 0; i--) {
+        const p = _particles[i];
+        p.x += p.vx; p.y += p.vy;
+        p.vy += p.grav; p.vx *= 0.97;
+        p.life -= p.decay;
+        if (p.life <= 0) { _particles.splice(i, 1); continue; }
+        ctx.globalAlpha = Math.max(0, p.life);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r * Math.max(0.2, p.life), 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
 // ─── BIRD ────────────────────────────────────────────────────────
 const bird = {
     x: BIRDX, y: BIRDY0, vy: 0, rot: 0,
@@ -623,25 +723,51 @@ function updateMenuBird() {
     if (mBirdFlapTimer > 0) mBirdFlapTimer--;
 }
 
-function menuBtn(x, y, w, h, r, color, glowColor, hovered) {
-    // glow
-    if (hovered) {
-        ctx.save();
-        ctx.shadowColor = glowColor;
-        ctx.shadowBlur  = 28;
-        ctx.fillStyle   = color;
-        ctx.beginPath(); ctx.roundRect(x,y,w,h,r); ctx.fill();
-        ctx.restore();
+function menuBtn(x, y, w, h, r, color, glowColor, _unused) {
+    const hov   = mouseX > x && mouseX < x+w && mouseY > y && mouseY < y+h;
+    const press = _pressX > x && _pressX < x+w && _pressY > y && _pressY < y+h;
+    const breathe = (Math.sin(frameCount * 0.055) + 1) * 0.5;
+
+    ctx.save();
+
+    // outer glow / shadow
+    ctx.shadowColor   = press ? 'rgba(0,0,0,0.65)' : glowColor;
+    ctx.shadowBlur    = press ? 4 : hov ? 30 : 8 + breathe * 9;
+    ctx.shadowOffsetY = press ? 1 : 3;
+
+    // gradient fill
+    const g = ctx.createLinearGradient(x, y, x, y + h);
+    if (press) {
+        g.addColorStop(0, _hexDarker(color, 0.15));
+        g.addColorStop(1, _hexDarker(color, 0.38));
+    } else {
+        g.addColorStop(0, _hexBrighter(color, hov ? 0.28 : 0.18));
+        g.addColorStop(0.55, color);
+        g.addColorStop(1, _hexDarker(color, hov ? 0.32 : 0.22));
     }
-    // bg
-    ctx.beginPath(); ctx.roundRect(x,y,w,h,r);
-    ctx.fillStyle = hovered ? color : color+'cc'; ctx.fill();
-    // shine
-    ctx.beginPath(); ctx.roundRect(x+2,y+2,w-4,h*0.38,[r,r,0,0]);
-    ctx.fillStyle='rgba(255,255,255,0.14)'; ctx.fill();
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill();
+
+    ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+
+    // top shine
+    const shineOff = press ? h * 0.1 : 2;
+    const sg = ctx.createLinearGradient(x, y + shineOff, x, y + h * 0.5);
+    sg.addColorStop(0, `rgba(255,255,255,${press ? 0.06 : hov ? 0.28 : 0.20})`);
+    sg.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = sg;
+    ctx.beginPath(); ctx.roundRect(x+2, y+shineOff, w-4, h*0.46, [r,r,0,0]); ctx.fill();
+
+    // bottom dark lip
+    ctx.fillStyle = `rgba(0,0,0,${press ? 0.12 : 0.30})`;
+    ctx.beginPath(); ctx.roundRect(x+3, y+h-5, w-6, 5, [0,0,r,r]); ctx.fill();
+
     // border
-    ctx.beginPath(); ctx.roundRect(x,y,w,h,r);
-    ctx.strokeStyle = glowColor; ctx.lineWidth = hovered?2.5:1.5; ctx.stroke();
+    ctx.strokeStyle = hov || press ? glowColor : 'rgba(255,255,255,0.14)';
+    ctx.lineWidth   = hov ? 2.5 : 1.5;
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.stroke();
+
+    ctx.restore();
 }
 
 // Draws the live game world (selected bg + demo pipes + ground + flying bird)
@@ -783,6 +909,10 @@ function drawBackground(bgIdx) {
         ctx.fillStyle = g;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
+    // stars + parallax city layers
+    _drawStars();
+    _drawCityLayer(_cityFar,  'rgba(0,0,18,0.52)',  PIPESPD * 0.13);
+    _drawCityLayer(_cityNear, 'rgba(0,0,10,0.70)', PIPESPD * 0.26);
     // world tier tint overlay (only applies in-game; 0 tint on tier 0)
     const t = getTier();
     if (t.tint) {
@@ -799,21 +929,53 @@ function getTier() {
 function drawPipes() {
     const t = getTier();
     for (const p of pipes) {
+        // ── top pipe ──────────────────────────────────────────────
         ctx.fillStyle = t.pc;
         ctx.fillRect(p.x, 0, PIPEW, p.topH - 22);
+        // gradient L→R for depth
+        const pg1 = ctx.createLinearGradient(p.x, 0, p.x + PIPEW, 0);
+        pg1.addColorStop(0,   'rgba(255,255,255,0.13)');
+        pg1.addColorStop(0.3, 'rgba(255,255,255,0)');
+        pg1.addColorStop(0.8, 'rgba(0,0,0,0)');
+        pg1.addColorStop(1,   'rgba(0,0,0,0.22)');
+        ctx.fillStyle = pg1;
+        ctx.fillRect(p.x, 0, PIPEW, p.topH - 22);
+        // bright left-edge highlight
+        ctx.fillStyle = 'rgba(255,255,255,0.20)';
+        ctx.fillRect(p.x + 3, 0, 5, p.topH - 22);
+
+        // cap top
         ctx.fillStyle = t.pd;
         ctx.fillRect(p.x - 7, p.topH - 22, PIPEW + 14, 22);
-        ctx.fillStyle = 'rgba(255,255,255,0.1)';
-        ctx.fillRect(p.x + 6, 0, 12, p.topH - 22);
+        const cg1 = ctx.createLinearGradient(p.x-7, p.topH-22, p.x-7, p.topH);
+        cg1.addColorStop(0, 'rgba(255,255,255,0.18)');
+        cg1.addColorStop(1, 'rgba(0,0,0,0.18)');
+        ctx.fillStyle = cg1;
+        ctx.fillRect(p.x - 7, p.topH - 22, PIPEW + 14, 22);
 
+        // ── bottom pipe ───────────────────────────────────────────
         ctx.fillStyle = t.pc;
         ctx.fillRect(p.x, p.botY + 22, PIPEW, canvas.height);
+        const pg2 = ctx.createLinearGradient(p.x, 0, p.x + PIPEW, 0);
+        pg2.addColorStop(0,   'rgba(255,255,255,0.13)');
+        pg2.addColorStop(0.3, 'rgba(255,255,255,0)');
+        pg2.addColorStop(0.8, 'rgba(0,0,0,0)');
+        pg2.addColorStop(1,   'rgba(0,0,0,0.22)');
+        ctx.fillStyle = pg2;
+        ctx.fillRect(p.x, p.botY + 22, PIPEW, canvas.height);
+        ctx.fillStyle = 'rgba(255,255,255,0.20)';
+        ctx.fillRect(p.x + 3, p.botY + 22, 5, canvas.height);
+
+        // cap bottom
         ctx.fillStyle = t.pd;
         ctx.fillRect(p.x - 7, p.botY, PIPEW + 14, 22);
-        ctx.fillStyle = 'rgba(255,255,255,0.1)';
-        ctx.fillRect(p.x + 6, p.botY + 22, 12, canvas.height);
+        const cg2 = ctx.createLinearGradient(p.x-7, p.botY, p.x-7, p.botY+22);
+        cg2.addColorStop(0, 'rgba(255,255,255,0.18)');
+        cg2.addColorStop(1, 'rgba(0,0,0,0.18)');
+        ctx.fillStyle = cg2;
+        ctx.fillRect(p.x - 7, p.botY, PIPEW + 14, 22);
 
-        // moving pipe indicator: small arrows on the caps
+        // moving pipe indicator
         if (p.vy) {
             const arrow = p.vy > 0 ? '▼' : '▲';
             ctx.font = `bold ${Math.round(PIPEW * 0.5)}px Arial`;
@@ -1388,7 +1550,10 @@ function handleKey(e) {
 }
 
 canvas.addEventListener('click',      handleInput);
-canvas.addEventListener('touchstart', e => { e.preventDefault(); handleInput(e); }, {passive:false});
+canvas.addEventListener('touchstart', e => { e.preventDefault(); const p=canvasXY(e); _pressX=p.x; _pressY=p.y; handleInput(e); }, {passive:false});
+canvas.addEventListener('touchend',   () => { _pressX=-999; _pressY=-999; });
+canvas.addEventListener('mousedown',  e => { const p=canvasXY(e); _pressX=p.x; _pressY=p.y; });
+canvas.addEventListener('mouseup',    () => { _pressX=-999; _pressY=-999; });
 document.addEventListener('keydown',  handleKey);
 
 // ─── GAME FLOW ───────────────────────────────────────────────────
@@ -1410,6 +1575,7 @@ function killBird() {
     dyingTimer = 0;
     generateCracks(bird.x, bird.y);
     stopMusic();
+    spawnParticles(bird.x, bird.y);
     if (score > best) {
         best = score;
         localStorage.setItem('r3b_best', best);
@@ -1435,12 +1601,14 @@ function loop() {
         drawCustomizer();
     } else if (state === 'DYING') {
         drawDying();
+        updateDrawParticles();
     } else if (state === 'NICKNAME') {
         drawBackground(currentBg);
         drawPipes();
         drawGround();
         bird.draw(null, null, null, false, null);
         drawScore();
+        updateDrawParticles();
         drawDead();
         drawNickname();
     } else if (state === 'LEADERBOARD') {
@@ -1452,6 +1620,7 @@ function loop() {
         drawGround();
         bird.draw(null, null, null, false, null);
         drawScore();
+        updateDrawParticles();
         if (state === 'DEAD') drawDead();
     }
 
