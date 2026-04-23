@@ -64,6 +64,42 @@ function revealGame() {
     setTimeout(() => { ls.style.display = 'none'; }, 500);
     demo.init();
     state = 'MENU';
+    // try autoplay immediately; browsers may block until first interaction
+    startMusicOnce();
+}
+
+// ─── BACKGROUND MUSIC ────────────────────────────────────────────
+// Add more filenames here as you upload tracks to Music/
+const MUSIC_TRACKS = [
+    'Music/Milky_-_Just_The_Way_You_Are.mp3',
+];
+let _bgAudio    = null;
+let _musicReady = false;
+
+function _shuffled(arr) {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+}
+
+let _playlist = [];
+function _playTrack(idx) {
+    if (!_playlist.length) return;
+    if (_bgAudio) { _bgAudio.pause(); _bgAudio = null; }
+    _bgAudio = new Audio(_playlist[idx % _playlist.length]);
+    _bgAudio.volume = 0.22;
+    _bgAudio.onended = () => _playTrack(idx + 1);
+    _bgAudio.play().catch(() => {});
+}
+
+function startMusicOnce() {
+    if (_musicReady || !MUSIC_TRACKS.length) return;
+    _musicReady = true;
+    _playlist = _shuffled(MUSIC_TRACKS);
+    _playTrack(0);
 }
 
 // ─── RESPONSIVE CANVAS ───────────────────────────────────────────
@@ -108,8 +144,8 @@ const PIPE_INT = 95;
 const TIERS = [
     { min:0,  tint: null,                   pc:'#4CAF50', pd:'#388E3C', gd:'#5d3a1a', gc:'#2e7d32', gc2:'#43a047' },
     { min:10, tint:'rgba(255,80,0,0.15)',   pc:'#FF7043', pd:'#E64A19', gd:'#4e2000', gc:'#bf5000', gc2:'#e65100' },
-    { min:25, tint:'rgba(0,0,40,0.38)',     pc:'#1565C0', pd:'#0D47A1', gd:'#0d0d1e', gc:'#1a237e', gc2:'#283593' },
-    { min:50, tint:'rgba(120,0,0,0.42)',    pc:'#B71C1C', pd:'#7F0000', gd:'#1a0000', gc:'#7f0000', gc2:'#c62828' },
+    { min:20, tint:'rgba(0,0,40,0.38)',     pc:'#1565C0', pd:'#0D47A1', gd:'#0d0d1e', gc:'#1a237e', gc2:'#283593' },
+    { min:30, tint:'rgba(120,0,0,0.42)',    pc:'#B71C1C', pd:'#7F0000', gd:'#1a0000', gc:'#7f0000', gc2:'#c62828' },
 ];
 let currentTier = 0;
 let currentBg   = 0;
@@ -143,24 +179,25 @@ const demo = {
         this.bird.vy = Math.min(this.bird.vy + GRAVITY_V, canvas.height * 0.022);
         this.bird.y += this.bird.vy;
 
-        // natural arc AI: flap once when falling below the gap center — no oscillation
+        // gentle flap — 58% of player force so arcs are smooth, not bouncy
+        const demoFlap = FLAP_V * 0.58;
         const next = this.pipes.find(p => p.x + PIPEW > BIRDX - BIRDR);
         if (next) {
             const gapMid = next.topH + PIPEGAP * 0.5;
-            // only flap while falling (vy positive-ish), not while already shooting up
-            if (this.bird.vy > -FLAP_V * 0.12 && this.bird.y > gapMid - BIRDR * 0.5) {
-                this.bird.vy = FLAP_V;
+            // flap only while falling and below gap centre — one clean arc per gap
+            if (this.bird.vy >= 0 && this.bird.y > gapMid) {
+                this.bird.vy = demoFlap;
             }
-            // emergency safety snap (rarely needed with above logic)
+            // safety snap if somehow inside a pipe
             const inX = next.x < BIRDX + BIRDR && next.x + PIPEW > BIRDX - BIRDR;
             if (inX && (this.bird.y < next.topH + BIRDR || this.bird.y > next.topH + PIPEGAP - BIRDR)) {
                 this.bird.y  += (gapMid - this.bird.y) * 0.4;
-                this.bird.vy  = FLAP_V * 0.7;
+                this.bird.vy  = demoFlap;
             }
         } else {
-            // no pipe: gently hover around screen centre — flap only when falling
-            if (this.bird.vy > -FLAP_V * 0.12 && this.bird.y > canvas.height * 0.52) {
-                this.bird.vy = FLAP_V;
+            // no pipe: hover near 48% height — flap only while falling
+            if (this.bird.vy >= 0 && this.bird.y > canvas.height * 0.48) {
+                this.bird.vy = demoFlap;
             }
         }
 
@@ -284,13 +321,24 @@ function spawnPipe() {
     const minH = GH + 40;
     const maxH = canvas.height - GH - PIPEGAP - minH;
     const topH = minH + Math.random() * maxH;
-    pipes.push({ x: canvas.width + 10, topH, botY: topH + PIPEGAP, scored: false });
+    // moving pipes start appearing from tier 1 onward, ~40% chance
+    const moving = currentTier >= 1 && Math.random() < 0.4;
+    const vy = moving ? (1.2 + Math.random() * 1.6) * (Math.random() < 0.5 ? 1 : -1) : 0;
+    pipes.push({ x: canvas.width + 10, topH, botY: topH + PIPEGAP, scored: false, vy });
 }
 
 function updatePipes() {
     if (++pipeTimer >= PIPE_INT) { spawnPipe(); pipeTimer = 0; }
     for (let i = pipes.length - 1; i >= 0; i--) {
         pipes[i].x -= PIPESPD;
+        // vertical movement for moving pipes
+        if (pipes[i].vy) {
+            const minH = GH + 44, maxH = canvas.height - GH - PIPEGAP - 44;
+            pipes[i].topH += pipes[i].vy;
+            if (pipes[i].topH <= minH || pipes[i].topH >= maxH) pipes[i].vy = -pipes[i].vy;
+            pipes[i].topH = Math.max(minH, Math.min(maxH, pipes[i].topH));
+            pipes[i].botY = pipes[i].topH + PIPEGAP;
+        }
         if (!pipes[i].scored && pipes[i].x + PIPEW < bird.x - BIRDHR) {
             pipes[i].scored = true;
             score++;
@@ -538,6 +586,16 @@ function drawPipes() {
         ctx.fillRect(p.x - 7, p.botY, PIPEW + 14, 22);
         ctx.fillStyle = 'rgba(255,255,255,0.1)';
         ctx.fillRect(p.x + 6, p.botY + 22, 12, canvas.height);
+
+        // moving pipe indicator: small arrows on the caps
+        if (p.vy) {
+            const arrow = p.vy > 0 ? '▼' : '▲';
+            ctx.font = `bold ${Math.round(PIPEW * 0.5)}px Arial`;
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillStyle = 'rgba(255,255,255,0.7)';
+            ctx.fillText(arrow, p.x + PIPEW / 2, p.topH - 11);
+            ctx.fillText(arrow, p.x + PIPEW / 2, p.botY + 11);
+        }
     }
 }
 
@@ -591,91 +649,112 @@ function rr(x, y, w, h, r, fill, stroke, lw) {
 
 function drawCustomizer() {
     demo.update();
-    drawDemoWorld(0.72); // heavier overlay so customizer UI stays crisp
+    drawDemoWorld(0.68);
 
     const W = canvas.width, H = canvas.height, cx = W/2;
 
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = `bold ${Math.round(H*0.018)}px Arial`;
-    ctx.fillStyle = '#555';
-    ctx.fillText('R3TARD3D BIRD  ·  BUILD YOUR CHARACTER', cx, H*0.03);
+    // ── title ──
+    const ts = Math.min(Math.round(W*0.028), 22);
+    drawPixelTitle(cx, H*0.032, ts, false);
 
-    const pSz = Math.min(Math.round(W*0.55), Math.round(H*0.38));
-    const pX  = cx - pSz/2, pY = Math.round(H*0.05);
+    // ── preview panel ──
+    const pSz = Math.min(Math.round(W*0.52), Math.round(H*0.4));
+    const pX  = cx - pSz/2, pY = Math.round(H*0.06);
+
+    // animated rainbow border
+    const hue = (frameCount * 1.2) % 360;
+    ctx.save();
+    ctx.shadowColor = `hsl(${hue},80%,60%)`;
+    ctx.shadowBlur  = 22;
+    ctx.strokeStyle = `hsl(${hue},80%,60%)`;
+    ctx.lineWidth   = 3;
+    ctx.beginPath(); ctx.roundRect(pX-1, pY-1, pSz+2, pSz+2, 20); ctx.stroke();
+    ctx.restore();
 
     ctx.save();
-    ctx.beginPath();
-    ctx.roundRect(pX, pY, pSz, pSz, 18);
-    ctx.clip();
-
+    ctx.beginPath(); ctx.roundRect(pX, pY, pSz, pSz, 18); ctx.clip();
     const bgImg = IMG.backgrounds[TRAITS.backgrounds[sel.backgrounds]];
     if (imgReady(bgImg)) ctx.drawImage(bgImg, pX, pY, pSz, pSz);
     else { ctx.fillStyle='#1a1a2e'; ctx.fillRect(pX, pY, pSz, pSz); }
-
     const eyeImg = IMG.eyes[TRAITS.eyes[sel.eyes]];
     if (imgReady(eyeImg)) ctx.drawImage(eyeImg, pX, pY, pSz, pSz);
-
     const mouthImg = IMG.mouth[TRAITS.mouth[sel.mouth]];
     if (imgReady(mouthImg)) ctx.drawImage(mouthImg, pX, pY, pSz, pSz);
-
     ctx.restore();
-    rr(pX, pY, pSz, pSz, 18, null, 'rgba(255,255,255,0.15)', 1.5);
 
-    const selY0 = pY + pSz + Math.round(H*0.025);
-    const rowH  = Math.round(H*0.09);
-    const AW    = Math.round(W*0.1);
-    const AH    = Math.round(rowH*0.76);
-    const pad   = Math.round(W*0.035);
-    const fs    = Math.round(H*0.022);
+    // ── trait rows ──
+    const selY0 = pY + pSz + Math.round(H*0.022);
+    const rowH  = Math.round(H*0.088);
+    const AW    = Math.round(W*0.095);
+    const AH    = Math.round(rowH*0.72);
+    const pad   = Math.round(W*0.032);
+    const fs    = Math.round(H*0.024);
 
     CATS.forEach((cat, i) => {
         const ry = selY0 + i*rowH;
-        rr(pad, ry, W-pad*2, rowH-8, 10, '#111120', 'rgba(255,255,255,0.08)', 1);
 
+        // row bg with subtle left accent stripe per category
+        const accent = ['#9b59b6','#3498db','#e74c3c'][i];
+        rr(pad, ry, W-pad*2, rowH-6, 10, '#0e0e1c', null);
+        ctx.fillStyle = accent;
+        ctx.beginPath(); ctx.roundRect(pad, ry, 4, rowH-6, [10,0,0,10]); ctx.fill();
+
+        // category label
         ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-        ctx.font = `bold ${Math.round(H*0.015)}px Arial`;
-        ctx.fillStyle = '#555';
-        ctx.fillText(CAT_LABELS[cat], pad+14, ry+8);
+        ctx.font = `bold ${Math.round(H*0.014)}px Arial`;
+        ctx.fillStyle = accent;
+        ctx.fillText(CAT_LABELS[cat], pad+16, ry+7);
 
+        // trait name (bright, bold)
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.font = `bold ${fs}px Arial`;
-        ctx.fillStyle = '#eee';
-        ctx.fillText(TRAITS[cat][sel[cat]], W/2, ry+rowH/2-4);
+        ctx.fillStyle = 'white';
+        ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=4;
+        ctx.fillText(TRAITS[cat][sel[cat]], cx, ry+rowH/2-2);
+        ctx.shadowBlur=0;
 
-        const lx=pad+2, ly=ry+Math.round((rowH-AH)/2);
-        rr(lx, ly, AW, AH, 8, '#181828', 'rgba(255,255,255,0.12)', 1);
-        ctx.font=`${Math.round(H*0.028)}px Arial`; ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillStyle='#bbb';
+        // left arrow button
+        const lx=pad+6, ly=ry+Math.round((rowH-AH)/2);
+        const hovL = mouseX>lx&&mouseX<lx+AW&&mouseY>ly&&mouseY<ly+AH;
+        rr(lx, ly, AW, AH, 8, hovL?'#2a2a42':'#181828', accent, 1.5);
+        ctx.font=`${Math.round(H*0.03)}px Arial`; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillStyle = hovL ? 'white' : '#bbb';
         ctx.fillText('◀', lx+AW/2, ly+AH/2);
         UI[`${cat}_prev`] = {x:lx,y:ly,w:AW,h:AH};
 
-        const rx2=W-pad-AW-2, ry2=ly;
-        rr(rx2, ry2, AW, AH, 8, '#181828', 'rgba(255,255,255,0.12)', 1);
+        // right arrow button (explicit fillStyle reset after rr changes it)
+        const rx2=W-pad-AW-6, ry2=ly;
+        const hovR = mouseX>rx2&&mouseX<rx2+AW&&mouseY>ry2&&mouseY<ry2+AH;
+        rr(rx2, ry2, AW, AH, 8, hovR?'#2a2a42':'#181828', accent, 1.5);
+        ctx.fillStyle = hovR ? 'white' : '#bbb'; // must reset after rr
+        ctx.font=`${Math.round(H*0.03)}px Arial`; ctx.textAlign='center'; ctx.textBaseline='middle';
         ctx.fillText('▶', rx2+AW/2, ry2+AH/2);
         UI[`${cat}_next`] = {x:rx2,y:ry2,w:AW,h:AH};
     });
 
-    const btnY = selY0 + CATS.length*rowH + Math.round(H*0.015);
-    const btnH = Math.round(H*0.077);
+    // ── action buttons ──
+    const btnY = selY0 + CATS.length*rowH + Math.round(H*0.018);
+    const btnH = Math.round(H*0.08);
     const btnW = Math.round((W-pad*3)/2);
-    const bfs  = Math.round(H*0.021);
+    const bfs  = Math.round(H*0.024);
 
-    rr(pad, btnY, btnW, btnH, 12, '#181828', 'rgba(255,255,255,0.12)', 1);
+    const hovRand = mouseX>pad&&mouseX<pad+btnW&&mouseY>btnY&&mouseY<btnY+btnH;
+    menuBtn(pad, btnY, btnW, btnH, 12, '#2c2c4a', '#9b59b6', hovRand);
     ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.font=`bold ${bfs}px Arial`; ctx.fillStyle='#ccc';
+    ctx.font=`bold ${bfs}px Arial`; ctx.fillStyle='white';
     ctx.fillText('⚡  RANDOM', pad+btnW/2, btnY+btnH/2);
     UI.random = {x:pad,y:btnY,w:btnW,h:btnH};
 
     const playX = pad*2+btnW;
-    rr(playX, btnY, btnW, btnH, 12, '#27ae60', null, 0);
-    ctx.fillStyle='#fff'; ctx.font=`bold ${bfs}px Arial`;
+    const hovPlay2 = mouseX>playX&&mouseX<playX+btnW&&mouseY>btnY&&mouseY<btnY+btnH;
+    menuBtn(playX, btnY, btnW, btnH, 12, '#1e8449', '#2ecc71', hovPlay2);
+    ctx.fillStyle='white'; ctx.font=`bold ${bfs}px Arial`;
     ctx.fillText('▶  PLAY', playX+btnW/2, btnY+btnH/2);
     UI.play = {x:playX,y:btnY,w:btnW,h:btnH};
 
     if (best > 0) {
-        ctx.font=`${Math.round(H*0.018)}px Arial`; ctx.fillStyle='#FFD700';
-        ctx.fillText(`🏆  Best: ${best}`, W/2, btnY+btnH+Math.round(H*0.04));
+        ctx.font=`bold ${Math.round(H*0.02)}px Arial`; ctx.fillStyle='#FFD700';
+        ctx.fillText(`🏆  Best: ${best}`, cx, btnY+btnH+Math.round(H*0.04));
     }
 }
 
@@ -873,6 +952,7 @@ function canvasXY(e) {
 }
 
 function handleInput(e) {
+    startMusicOnce(); // start music on first tap (browser autoplay policy)
     const {x,y} = canvasXY(e);
 
     if (state === 'MENU') {
