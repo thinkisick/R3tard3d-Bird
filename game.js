@@ -64,9 +64,8 @@ function revealGame() {
     setTimeout(() => { ls.style.display = 'none'; }, 500);
     demo.init();
     state = 'MENU';
-    lbFetch(); // populate leaderboard from localStorage (and Firebase if configured)
-    // try autoplay immediately; browsers may block until first interaction
-    startMusicOnce();
+    lbFetch();
+    lbConnect();
 }
 
 // ─── BACKGROUND MUSIC ────────────────────────────────────────────
@@ -105,6 +104,11 @@ function startMusicOnce() {
     _musicReady = true;  // set optimistically; reset on play() failure
     if (!_playlist.length) _playlist = _shuffled(MUSIC_TRACKS);
     _playTrack(0);
+}
+
+function stopMusic() {
+    if (_bgAudio) { _bgAudio.pause(); _bgAudio = null; }
+    _musicReady = false;
 }
 
 // ─── RESPONSIVE CANVAS ───────────────────────────────────────────
@@ -274,6 +278,59 @@ async function lbFetch() {
         if (d && typeof d === 'object')
             lbData = Object.values(d).sort((a,b)=>b.score-a.score).slice(0,10);
     } catch(e) {}
+}
+
+// ─── LIVE LEADERBOARD (Firebase SSE) ────────────────────────────
+const _lbCache = {};
+let _lbEs = null;
+
+function _lbUpdateFromCache() {
+    lbData = Object.values(_lbCache)
+        .filter(v => v && typeof v.score === 'number')
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 10);
+}
+
+function lbConnect() {
+    if (!FIREBASE_URL || typeof EventSource === 'undefined') {
+        setInterval(lbFetch, 10000);
+        return;
+    }
+    if (_lbEs) return;
+    try {
+        _lbEs = new EventSource(`${FIREBASE_URL}/lb.json`);
+        _lbEs.addEventListener('put', e => {
+            try {
+                const { path, data } = JSON.parse(e.data);
+                if (path === '/') {
+                    Object.keys(_lbCache).forEach(k => delete _lbCache[k]);
+                    if (data && typeof data === 'object') Object.assign(_lbCache, data);
+                } else {
+                    const key = decodeURIComponent(path.slice(1));
+                    if (data === null) delete _lbCache[key];
+                    else _lbCache[key] = data;
+                }
+                _lbUpdateFromCache();
+            } catch(_) {}
+        });
+        _lbEs.addEventListener('patch', e => {
+            try {
+                const { path, data } = JSON.parse(e.data);
+                if (data && typeof data === 'object') {
+                    if (path === '/') Object.assign(_lbCache, data);
+                    else _lbCache[decodeURIComponent(path.slice(1))] = data;
+                    _lbUpdateFromCache();
+                }
+            } catch(_) {}
+        });
+        _lbEs.onerror = () => {
+            _lbEs.close();
+            _lbEs = null;
+            setTimeout(lbConnect, 15000);
+        };
+    } catch(_) {
+        setInterval(lbFetch, 10000);
+    }
 }
 
 // ─── NICKNAME HTML INPUT OVERLAY ─────────────────────────────────
@@ -1047,8 +1104,8 @@ function drawDead() {
     const statFS = Math.min(Math.round(H * 0.028), 23);
     const col1x  = panelX + panelW * 0.28;
     const col2x  = panelX + panelW * 0.65;
-    const row1y  = panelY + panelH * 0.53;
-    const row2y  = panelY + panelH * 0.63;
+    const row1y  = panelY + panelH * 0.48;
+    const row2y  = panelY + panelH * 0.58;
 
     ctx.font = `${statFS}px Arial`; ctx.fillStyle = 'rgba(255,255,255,0.6)';
     ctx.textAlign = 'left';
@@ -1067,14 +1124,14 @@ function drawDead() {
     const btnA = easeOut(Math.max(deadTimer - 26, 0), 16);
     ctx.globalAlpha = Math.min(btnA, 1);
 
-    const bh    = Math.round(panelH * 0.125);
+    const bh    = Math.round(panelH * 0.10);
     const bpad  = panelW * 0.05;
     const bgap  = Math.round(panelW * 0.04);
     const btot  = panelW - bpad * 2;
     const bwEa  = (btot - bgap) / 2;
     const bxL   = panelX + bpad;
     const bxR   = bxL + bwEa + bgap;
-    const bby   = panelY + panelH * 0.76;
+    const bby   = panelY + panelH * 0.68;
 
     // Play Again (green, left)
     menuBtn(bxL, bby, bwEa, bh, 12, '#1e8449', '#2ecc71',
@@ -1096,6 +1153,17 @@ function drawDead() {
     ctx.fillText('Character', bxR + bwEa / 2, bby + bh * 0.72);
     ctx.shadowBlur = 0;
     UI.customize = { x: bxR, y: bby, w: bwEa, h: bh };
+
+    // Back to Main Menu (navy, full-width, second row)
+    const bby2    = bby + bh + Math.round(H * 0.013);
+    menuBtn(bxL, bby2, btot, bh, 12, '#0d3b5e', '#1a7abf',
+        mouseX > bxL && mouseX < bxL + btot && mouseY > bby2 && mouseY < bby2 + bh);
+    ctx.font = `bold ${Math.min(Math.round(H * 0.022), 18)}px Arial`;
+    ctx.fillStyle = 'white'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 4;
+    ctx.fillText('← Main Menu', cx, bby2 + bh / 2);
+    ctx.shadowBlur = 0;
+    UI.backMenu = { x: bxL, y: bby2, w: btot, h: bh };
 
     ctx.globalAlpha = 1;
 }
@@ -1237,7 +1305,6 @@ function canvasXY(e) {
 }
 
 function handleInput(e) {
-    startMusicOnce(); // start music on first tap (browser autoplay policy)
     const {x,y} = canvasXY(e);
 
     if (state === 'MENU') {
@@ -1274,6 +1341,7 @@ function handleInput(e) {
     if (state === 'DEAD') {
         if (hits('restart',   x, y)) { startGame(); return; }
         if (hits('customize', x, y)) { state = 'CUSTOMIZER'; return; }
+        if (hits('backMenu',  x, y)) { state = 'MENU'; return; }
     }
 
     if (state === 'NICKNAME') {
@@ -1325,12 +1393,14 @@ function startGame() {
     pipeTimer    = PIPE_INT - 28;
     bird.reset();
     bird.flap();
+    startMusicOnce();
 }
 
 function killBird() {
     state      = 'DYING';
     dyingTimer = 0;
     generateCracks(bird.x, bird.y);
+    stopMusic();
     if (score > best) {
         best = score;
         localStorage.setItem('r3b_best', best);
