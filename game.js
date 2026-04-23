@@ -1241,7 +1241,8 @@ function drawLeaderboard() {
     const pw = Math.min(W * 0.82, 480);
     const show = Math.min(lbData.length, 10);
     const rowH3 = Math.round(H * 0.054);
-    const ph = rowH3 * (show + 2) + 20;
+    const cbh = Math.round(H * 0.065);
+    const ph = rowH3 * (show + 2) + cbh + 44;
     const px = cx - pw / 2;
     const py = Math.max((H - ph) / 2, 20);
 
@@ -1286,8 +1287,8 @@ function drawLeaderboard() {
     }
 
     // close button
-    const cbw = Math.min(pw * 0.4, 160), cbh = Math.round(H * 0.065);
-    const cbx = cx - cbw / 2, cby = py + ph - cbh - 14;
+    const cbw = Math.min(pw * 0.5, 200);
+    const cbx = cx - cbw / 2, cby = py + ph - cbh - 16;
     const hovClose = mouseX > cbx && mouseX < cbx + cbw && mouseY > cby && mouseY < cby + cbh;
     menuBtn(cbx, cby, cbw, cbh, 12, '#222240', '#666699', hovClose);
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
