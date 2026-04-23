@@ -142,21 +142,41 @@ const demo = {
     update() {
         this.bird.vy = Math.min(this.bird.vy + GRAVITY_V, canvas.height * 0.022);
         this.bird.y += this.bird.vy;
-        // simple AI: aim for gap centre of next pipe, else hover at 45%
+
+        // find next pipe the bird needs to pass through
         const next = this.pipes.find(p => p.x + PIPEW > BIRDX - BIRDR);
-        const target = next ? next.topH + PIPEGAP * 0.5 : canvas.height * 0.45;
-        if (this.bird.y > target - BIRDR * 1.5 && this.bird.vy > -FLAP_V * 0.2) {
-            this.bird.vy = FLAP_V;
+        if (next) {
+            const gapTop    = next.topH + BIRDR * 1.8;
+            const gapBot    = next.topH + PIPEGAP - BIRDR * 1.8;
+            const gapCenter = (gapTop + gapBot) * 0.5;
+            // aggressively aim for gap center
+            if (this.bird.y > gapCenter || this.bird.vy > 0) {
+                if (this.bird.y > gapCenter - canvas.height * 0.04) {
+                    this.bird.vy = FLAP_V * 0.92;
+                }
+            }
+            // emergency snap: if bird is inside pipe X and outside the gap, warp to center
+            const inPipeX = next.x < BIRDX + BIRDR && next.x + PIPEW > BIRDX - BIRDR;
+            if (inPipeX && (this.bird.y < next.topH + BIRDR || this.bird.y > next.topH + PIPEGAP - BIRDR)) {
+                this.bird.y += (gapCenter - this.bird.y) * 0.35;
+                this.bird.vy = FLAP_V * 0.5;
+            }
+        } else {
+            // no pipe ahead: drift gently back to centre
+            if (this.bird.y > canvas.height * 0.52 || this.bird.vy > canvas.height * 0.008) {
+                this.bird.vy = FLAP_V * 0.88;
+            }
         }
+
         // guard edges
         if (this.bird.y < BIRDR * 2) { this.bird.y = BIRDR * 2; this.bird.vy = 0; }
         if (this.bird.y > canvas.height - GH - BIRDR * 2) {
             this.bird.y = canvas.height - GH - BIRDR * 2;
             this.bird.vy = FLAP_V;
         }
-        // scrolling pipes
-        if (++this.timer >= PIPE_INT) {
-            const minH = GH + 50, maxH = canvas.height - GH - PIPEGAP - minH;
+        // scrolling pipes — slightly more spread out than real game so AI looks clean
+        if (++this.timer >= Math.round(PIPE_INT * 1.35)) {
+            const minH = GH + 60, maxH = canvas.height - GH - PIPEGAP - minH;
             this.pipes.push({ x: canvas.width + 10, topH: minH + Math.random() * maxH });
             this.timer = 0;
         }
@@ -426,9 +446,9 @@ function drawMenu() {
 
     drawGround();
 
-    // demo bird (your selected character plays by itself)
+    // demo bird — no bg layer (full-screen NFT bg already drawn, avoids clip-edge outline)
     const dRot = Math.max(-25, Math.min(90, demo.bird.vy / GRAVITY_V * 3.3));
-    bird.draw(BIRDX, demo.bird.y, dRot, true, null);
+    bird.draw(BIRDX, demo.bird.y, dRot, false, null);
 
     // ── dark overlay so UI is readable ──
     ctx.fillStyle = 'rgba(0,0,0,0.54)';
