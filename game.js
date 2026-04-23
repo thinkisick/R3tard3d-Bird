@@ -72,7 +72,7 @@ function revealGame() {
 // ─── BACKGROUND MUSIC ────────────────────────────────────────────
 // Add more filenames here as you upload tracks to Music/
 const MUSIC_TRACKS = [
-    'Music/Milky_-_Just_The_Way_You_Are.mp3',
+    'Music/Milky_-_Just_The_Way_You_Are_Radio_Edit_(SkySound.cc).mp3',
 ];
 let _bgAudio    = null;
 let _musicReady = false;
@@ -559,17 +559,18 @@ function drawMenu() {
 
     // ── centered buttons ──
     const bw   = Math.min(W * 0.52, 340);
-    const bh   = Math.min(Math.round(H * 0.1), 68);
+    const bh   = Math.min(Math.round(H * 0.1), 64);
     const bx   = W / 2 - bw / 2;
-    const gap  = Math.round(H * 0.022);
-    const by1  = H * 0.38, by2 = by1 + bh + gap;
+    const gap  = Math.round(H * 0.018);
+    const by1  = H * 0.35, by2 = by1 + bh + gap, by3 = by2 + bh + gap;
 
     const hovPlay = mouseX > bx && mouseX < bx + bw && mouseY > by1 && mouseY < by1 + bh;
     const hovCust = mouseX > bx && mouseX < bx + bw && mouseY > by2 && mouseY < by2 + bh;
+    const hovLb   = mouseX > bx && mouseX < bx + bw && mouseY > by3 && mouseY < by3 + bh;
 
     menuBtn(bx, by1, bw, bh, 14, '#1e8449', '#2ecc71', hovPlay);
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = `bold ${Math.round(H * 0.034)}px Arial`;
+    ctx.font = `bold ${Math.round(H * 0.032)}px Arial`;
     ctx.fillStyle = 'white';
     ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 5;
     ctx.fillText('▶  PLAY', W / 2, by1 + bh / 2);
@@ -577,15 +578,23 @@ function drawMenu() {
     UI.menuPlay = { x: bx, y: by1, w: bw, h: bh };
 
     menuBtn(bx, by2, bw, bh, 14, '#5b2c8d', '#9b59b6', hovCust);
-    ctx.font = `bold ${Math.round(H * 0.03)}px Arial`;
+    ctx.font = `bold ${Math.round(H * 0.028)}px Arial`;
     ctx.fillStyle = 'white';
     ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 5;
     ctx.fillText('🎨  CUSTOMIZE', W / 2, by2 + bh / 2);
     ctx.shadowBlur = 0;
     UI.menuCustomize = { x: bx, y: by2, w: bw, h: bh };
 
+    menuBtn(bx, by3, bw, bh, 14, '#0d3b5e', '#1a7abf', hovLb);
+    ctx.font = `bold ${Math.round(H * 0.028)}px Arial`;
+    ctx.fillStyle = 'white';
+    ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 5;
+    ctx.fillText('🏆  LEADERBOARD', W / 2, by3 + bh / 2);
+    ctx.shadowBlur = 0;
+    UI.menuLb = { x: bx, y: by3, w: bw, h: bh };
+
     // best score
-    const lbY0 = by2 + bh + Math.round(H * 0.028);
+    const lbY0 = by3 + bh + Math.round(H * 0.022);
     if (best > 0) {
         ctx.font = `bold ${Math.round(H * 0.02)}px Arial`;
         ctx.fillStyle = '#FFD700';
@@ -888,8 +897,13 @@ function drawDying() {
     if (dyingTimer >= 65) {
         canvas.style.transform='';
         canvas.style.filter='';
-        state='DEAD';
         deadTimer=0;
+        if (!lbSavedNick() && score > 0) {
+            nicknameInput = '';
+            state = 'NICKNAME';
+        } else {
+            state = 'DEAD';
+        }
     }
 }
 
@@ -920,8 +934,6 @@ function drawDead() {
 
     // panel body
     rr(panelX, panelY, panelW, panelH, 22, '#0d0d1e', null);
-    ctx.fillStyle = '#c0392b';
-    ctx.beginPath(); ctx.roundRect(panelX, panelY, 5, panelH, [22, 0, 0, 22]); ctx.fill();
     const tg = ctx.createLinearGradient(panelX, panelY, panelX + panelW, panelY);
     tg.addColorStop(0, 'rgba(192,57,43,0)'); tg.addColorStop(0.5, 'rgba(192,57,43,0.9)'); tg.addColorStop(1, 'rgba(192,57,43,0)');
     ctx.fillStyle = tg; ctx.fillRect(panelX, panelY, panelW, 2);
@@ -1015,29 +1027,6 @@ function drawDead() {
     ctx.shadowBlur = 0;
     UI.customize = { x: bxR, y: bby, w: bwEa, h: bh };
 
-    // ── Save Score row (appears below buttons, after short delay) ──
-    if (score > 0) {
-        const saveA = easeOut(Math.max(deadTimer - 45, 0), 14);
-        ctx.globalAlpha = Math.min(saveA, 1);
-        const savedNick = lbSavedNick();
-        const saveY = bby + bh + Math.round(panelH * 0.04);
-        const saveFull = panelW * 0.86, saveBx = panelX + bpad;
-        if (savedNick) {
-            // auto-submit was done; show confirmation
-            ctx.font=`${Math.round(H*0.019)}px Arial`; ctx.textAlign='center'; ctx.textBaseline='middle';
-            ctx.fillStyle='rgba(46,204,113,0.85)';
-            ctx.fillText(`✓ Saved as "${savedNick}"  ·  tap to change`, cx, saveY + bh*0.38);
-            UI.nickChange = {x:saveBx, y:saveY, w:saveFull, h:bh*0.6};
-        } else {
-            const hovSave = mouseX>saveBx&&mouseX<saveBx+saveFull&&mouseY>saveY&&mouseY<saveY+bh*0.75;
-            menuBtn(saveBx, saveY, saveFull, bh*0.75, 10, '#1a1a35', '#9b59b6', hovSave);
-            ctx.font=`bold ${Math.round(H*0.02)}px Arial`; ctx.textAlign='center'; ctx.textBaseline='middle';
-            ctx.fillStyle='rgba(200,160,255,0.9)';
-            ctx.fillText('📝  Enter name to save score', cx, saveY + bh*0.375);
-            UI.nickOpen = {x:saveBx, y:saveY, w:saveFull, h:bh*0.75};
-        }
-    }
-
     ctx.globalAlpha = 1;
 }
 
@@ -1096,6 +1085,72 @@ function drawNickname() {
     UI.nickSave = {x:bxSave, y:by2, w:bw2, h:bh2};
 }
 
+// ─── DRAW: LEADERBOARD OVERLAY ───────────────────────────────────
+function drawLeaderboard() {
+    const W = canvas.width, H = canvas.height, cx = W / 2;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.88)';
+    ctx.fillRect(0, 0, W, H);
+
+    const pw = Math.min(W * 0.82, 480);
+    const show = Math.min(lbData.length, 10);
+    const rowH3 = Math.round(H * 0.054);
+    const ph = rowH3 * (show + 2) + 20;
+    const px = cx - pw / 2;
+    const py = Math.max((H - ph) / 2, 20);
+
+    rr(px, py, pw, ph, 22, '#0d0d1e', 'rgba(155,89,182,0.7)', 2);
+
+    // gradient top bar
+    const tg = ctx.createLinearGradient(px, py, px + pw, py);
+    tg.addColorStop(0, 'rgba(155,89,182,0)');
+    tg.addColorStop(0.5, 'rgba(155,89,182,0.9)');
+    tg.addColorStop(1, 'rgba(155,89,182,0)');
+    ctx.fillStyle = tg; ctx.fillRect(px, py, pw, 2);
+
+    // title
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `bold ${Math.round(H * 0.038)}px Arial`;
+    ctx.fillStyle = 'white';
+    ctx.fillText('🏆  LEADERBOARD', cx, py + rowH3 * 0.8);
+
+    // divider
+    const dg = ctx.createLinearGradient(px + pw * 0.06, 0, px + pw * 0.94, 0);
+    dg.addColorStop(0, 'rgba(255,255,255,0)'); dg.addColorStop(0.5, 'rgba(255,255,255,0.25)'); dg.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = dg; ctx.fillRect(px + pw * 0.06, py + rowH3 * 1.3, pw * 0.88, 1);
+
+    if (show === 0) {
+        ctx.font = `${Math.round(H * 0.022)}px Arial`;
+        ctx.fillStyle = 'rgba(200,200,200,0.5)';
+        ctx.fillText('No scores yet — be the first!', cx, py + rowH3 * 2.5);
+    } else {
+        const medals = ['🥇', '🥈', '🥉'];
+        for (let i = 0; i < show; i++) {
+            const ey = py + rowH3 * (i + 1.5) + 14;
+            const entry = lbData[i];
+            const isMe = lbSavedNick() === entry.nickname;
+            ctx.font = `bold ${Math.round(H * 0.028)}px Arial`;
+            ctx.fillStyle = i === 0 ? '#FFD700' : isMe ? '#7ecfff' : 'rgba(230,230,230,0.9)';
+            ctx.textAlign = 'left';
+            ctx.fillText(`${medals[i] || (i + 1) + '.'} ${entry.nickname}${isMe ? ' ◀ you' : ''}`, px + 22, ey);
+            ctx.textAlign = 'right';
+            ctx.fillStyle = i === 0 ? '#FFD700' : '#bbb';
+            ctx.fillText(entry.score, px + pw - 22, ey);
+        }
+    }
+
+    // close button
+    const cbw = Math.min(pw * 0.4, 160), cbh = Math.round(H * 0.065);
+    const cbx = cx - cbw / 2, cby = py + ph - cbh - 14;
+    const hovClose = mouseX > cbx && mouseX < cbx + cbw && mouseY > cby && mouseY < cby + cbh;
+    menuBtn(cbx, cby, cbw, cbh, 12, '#222240', '#666699', hovClose);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `bold ${Math.round(H * 0.025)}px Arial`;
+    ctx.fillStyle = hovClose ? 'white' : 'rgba(255,255,255,0.75)';
+    ctx.fillText('✕  CLOSE', cx, cby + cbh / 2);
+    UI.lbClose = { x: cbx, y: cby, w: cbw, h: cbh };
+}
+
 // ─── HIT TEST ────────────────────────────────────────────────────
 function hits(key, x, y) {
     const e = UI[key];
@@ -1116,9 +1171,15 @@ function handleInput(e) {
     const {x,y} = canvasXY(e);
 
     if (state === 'MENU') {
-        if (hits('menuPlay',      x, y)) { startGame();           return; }
-        if (hits('menuCustomize', x, y)) { state = 'CUSTOMIZER';  return; }
-        demo.bird.vy = FLAP_V; // fun: let player flap the background bird
+        if (hits('menuPlay',      x, y)) { startGame();                                     return; }
+        if (hits('menuCustomize', x, y)) { state = 'CUSTOMIZER';                            return; }
+        if (hits('menuLb',        x, y)) { lbFetch(); state = 'LEADERBOARD';                return; }
+        demo.bird.vy = FLAP_V;
+        return;
+    }
+
+    if (state === 'LEADERBOARD') {
+        if (hits('lbClose', x, y)) { state = 'MENU'; return; }
         return;
     }
 
@@ -1143,8 +1204,6 @@ function handleInput(e) {
     if (state === 'DEAD') {
         if (hits('restart',   x, y)) { startGame(); return; }
         if (hits('customize', x, y)) { state = 'CUSTOMIZER'; return; }
-        if (hits('nickOpen',  x, y)) { nicknameInput = lbSavedNick(); state = 'NICKNAME'; return; }
-        if (hits('nickChange',x, y)) { nicknameInput = lbSavedNick(); state = 'NICKNAME'; return; }
     }
 
     if (state === 'NICKNAME') {
@@ -1173,6 +1232,10 @@ function handleKey(e) {
             return;
         }
         if (e.key === 'Escape') { state = 'DEAD'; return; }
+    }
+
+    if (state === 'LEADERBOARD') {
+        if (e.key === 'Escape') { state = 'MENU'; return; }
         if (e.key.length === 1 && nicknameInput.length < 20) {
             nicknameInput += e.key;
         }
@@ -1242,6 +1305,9 @@ function loop() {
         drawScore();
         drawDead();
         drawNickname();
+    } else if (state === 'LEADERBOARD') {
+        drawMenu();
+        drawLeaderboard();
     } else {
         drawBackground(currentBg);
         drawPipes();
