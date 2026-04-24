@@ -486,6 +486,24 @@ function _genSkyline(count, segW, minH, maxH, seed) {
 const _cityFar  = _genSkyline(52, 58, 0.09, 0.30, 0x5A3E7B);
 const _cityNear = _genSkyline(40, 42, 0.05, 0.17, 0x2F9AC4);
 
+// ─── FILM GRAIN NOISE ────────────────────────────────────────────
+let _noisePattern = null;
+function _getNoisePattern() {
+    if (_noisePattern) return _noisePattern;
+    const nc = document.createElement('canvas');
+    nc.width = nc.height = 128;
+    const nctx = nc.getContext('2d');
+    const id = nctx.createImageData(128, 128);
+    for (let i = 0; i < id.data.length; i += 4) {
+        const v = (Math.random() * 255) | 0;
+        id.data[i] = id.data[i+1] = id.data[i+2] = v;
+        id.data[i+3] = (Math.random() * 18) | 0;
+    }
+    nctx.putImageData(id, 0, 0);
+    _noisePattern = ctx.createPattern(nc, 'repeat');
+    return _noisePattern;
+}
+
 function _drawCityLayer(segs, colorFill, scrollSpd) {
     const H = canvas.height, W = canvas.width, gY = H - GH;
     const totalW = segs.reduce((s, b) => s + b.w, 0);
@@ -727,16 +745,18 @@ function menuBtn(x, y, w, h, r, color, glowColor, _unused) {
     const hov   = mouseX > x && mouseX < x+w && mouseY > y && mouseY < y+h;
     const press = _pressX > x && _pressX < x+w && _pressY > y && _pressY < y+h;
     const breathe = (Math.sin(frameCount * 0.055) + 1) * 0.5;
+    // visual scale from center — hit area stays unchanged
+    const sc = press ? 0.95 : hov ? 1.05 : 1.0;
+    const dx = (w * (1 - sc)) / 2, dy = (h * (1 - sc)) / 2;
+    const vx = x+dx, vy = y+dy, vw = w*sc, vh = h*sc, vr = r*sc;
 
     ctx.save();
 
-    // outer glow / shadow
     ctx.shadowColor   = press ? 'rgba(0,0,0,0.65)' : glowColor;
     ctx.shadowBlur    = press ? 4 : hov ? 30 : 8 + breathe * 9;
     ctx.shadowOffsetY = press ? 1 : 3;
 
-    // gradient fill
-    const g = ctx.createLinearGradient(x, y, x, y + h);
+    const g = ctx.createLinearGradient(vx, vy, vx, vy + vh);
     if (press) {
         g.addColorStop(0, _hexDarker(color, 0.15));
         g.addColorStop(1, _hexDarker(color, 0.38));
@@ -746,26 +766,23 @@ function menuBtn(x, y, w, h, r, color, glowColor, _unused) {
         g.addColorStop(1, _hexDarker(color, hov ? 0.32 : 0.22));
     }
     ctx.fillStyle = g;
-    ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(vx, vy, vw, vh, vr); ctx.fill();
 
     ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
 
-    // top shine
-    const shineOff = press ? h * 0.1 : 2;
-    const sg = ctx.createLinearGradient(x, y + shineOff, x, y + h * 0.5);
+    const shineOff = press ? vh * 0.1 : 2;
+    const sg = ctx.createLinearGradient(vx, vy + shineOff, vx, vy + vh * 0.5);
     sg.addColorStop(0, `rgba(255,255,255,${press ? 0.06 : hov ? 0.28 : 0.20})`);
     sg.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = sg;
-    ctx.beginPath(); ctx.roundRect(x+2, y+shineOff, w-4, h*0.46, [r,r,0,0]); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(vx+2, vy+shineOff, vw-4, vh*0.46, [vr,vr,0,0]); ctx.fill();
 
-    // bottom dark lip
     ctx.fillStyle = `rgba(0,0,0,${press ? 0.12 : 0.30})`;
-    ctx.beginPath(); ctx.roundRect(x+3, y+h-5, w-6, 5, [0,0,r,r]); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(vx+3, vy+vh-5, vw-6, 5, [0,0,vr,vr]); ctx.fill();
 
-    // border
     ctx.strokeStyle = hov || press ? glowColor : 'rgba(255,255,255,0.14)';
     ctx.lineWidth   = hov ? 2.5 : 1.5;
-    ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.stroke();
+    ctx.beginPath(); ctx.roundRect(vx, vy, vw, vh, vr); ctx.stroke();
 
     ctx.restore();
 }
@@ -913,6 +930,12 @@ function drawBackground(bgIdx) {
     _drawStars();
     _drawCityLayer(_cityFar,  'rgba(0,0,18,0.52)',  PIPESPD * 0.13);
     _drawCityLayer(_cityNear, 'rgba(0,0,10,0.70)', PIPESPD * 0.26);
+    // film grain noise
+    ctx.save();
+    ctx.globalAlpha = 0.06;
+    ctx.fillStyle = _getNoisePattern();
+    ctx.fillRect(0, 0, canvas.width, canvas.height - GH);
+    ctx.restore();
     // world tier tint overlay (only applies in-game; 0 tint on tier 0)
     const t = getTier();
     if (t.tint) {
@@ -1005,20 +1028,20 @@ function drawScore() {
     const base = Math.round(canvas.height * 0.084);
     const scale = scoreAnim > 0 ? 1 + 0.4*(scoreAnim/18) : 1;
     if (scoreAnim > 0) scoreAnim--;
-    const fs = Math.round(base * scale);
+    const fs = Math.round(base * scale * 0.60);
     ctx.textAlign = 'center';
-    ctx.textBaseline = 'alphabetic';
-    ctx.font = `bold ${fs}px Arial`;
+    ctx.textBaseline = 'middle';
+    ctx.font = `${fs}px 'Press Start 2P', monospace`;
     ctx.fillStyle = 'white';
-    ctx.shadowColor = 'rgba(0,0,0,0.6)';
-    ctx.shadowBlur = 7;
-    ctx.fillText(score, canvas.width/2, canvas.height*0.14);
+    ctx.shadowColor = 'rgba(0,0,0,0.75)';
+    ctx.shadowBlur = 9;
+    ctx.fillText(score, canvas.width/2, canvas.height*0.12);
     ctx.shadowBlur = 0;
     // floating +1
     if (plusOneT > 0) {
         plusOneT--;
         ctx.globalAlpha = plusOneT/20;
-        ctx.font=`bold ${Math.round(base*0.55)}px Arial`;
+        ctx.font = `${Math.round(fs*0.52)}px 'Press Start 2P', monospace`;
         ctx.fillStyle='#FFD700';
         ctx.fillText('+1', canvas.width/2 + base*0.8, plusOneY - (20-plusOneT)*1.4);
         ctx.globalAlpha=1;
@@ -1277,16 +1300,17 @@ function drawDead() {
     const row1y  = panelY + panelH * 0.48;
     const row2y  = panelY + panelH * 0.58;
 
-    ctx.font = `${statFS}px Arial`; ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = `${Math.round(statFS * 0.62)}px 'Press Start 2P', monospace`;
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
     ctx.textAlign = 'left';
     ctx.fillText('Score', col1x, row1y);
     ctx.fillText('Best',  col1x, row2y);
 
-    ctx.font = `bold ${Math.round(statFS * 1.25)}px Arial`;
+    ctx.font = `${Math.round(statFS * 0.75)}px 'Press Start 2P', monospace`;
     ctx.textAlign = 'right';
     ctx.fillStyle = 'white';   ctx.fillText(score, col2x, row1y);
     ctx.fillStyle = '#FFD700'; ctx.fillText(
-        score > 0 && score >= best ? `${best} 🏆` : best,
+        score > 0 && score >= best ? `${best} *` : best,
         col2x, row2y
     );
 
@@ -1313,8 +1337,8 @@ function drawDead() {
     ctx.shadowBlur = 0;
     UI.restart = { x: bxL, y: bby, w: bwEa, h: bh };
 
-    // Change Character (purple, right)
-    menuBtn(bxR, bby, bwEa, bh, 12, '#5b2c8d', '#9b59b6',
+    // Change Your R3tard (pink, right)
+    menuBtn(bxR, bby, bwEa, bh, 12, '#8b1050', '#E84393',
         mouseX > bxR && mouseX < bxR + bwEa && mouseY > bby && mouseY < bby + bh);
     ctx.font = `bold ${Math.min(Math.round(H * 0.022), 18)}px Arial`;
     ctx.fillStyle = 'white';
@@ -1615,10 +1639,14 @@ function loop() {
         drawMenu();
         drawLeaderboard();
     } else {
+        if (state === 'DEAD') ctx.filter = 'blur(2px)';
         drawBackground(currentBg);
         drawPipes();
         drawGround();
-        bird.draw(null, null, null, false, null);
+        ctx.filter = 'none';
+        // subtle idle sway when playing
+        const _sway = state === 'PLAYING' ? Math.sin(frameCount * 0.18) * 1.8 : 0;
+        bird.draw(bird.x + _sway, null, null, false, null);
         drawScore();
         updateDrawParticles();
         if (state === 'DEAD') drawDead();
